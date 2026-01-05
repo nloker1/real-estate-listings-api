@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gorge Property Search</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" />
+
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+    <header>
+        <span>Gorge Property Search</span>
+    </header>
+
+    <form id="searchForm">
+        <input type="text" id="city" placeholder="City (e.g. Hood River)" />
+        <div class="price-inputs">
+            <input type="number" id="minPrice" placeholder="Min Price" />
+            <input type="number" id="maxPrice" placeholder="Max Price" />
+        </div>
+        
+        <div class="btn-group">
+            <button type="submit" id="searchBtn">Update Map</button>
+            <button type="button" id="saveSearchBtn">🔔 Save Search</button>
+        </div>
+    </form>
+
+    <div id="map"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+    
+    <script src="/static/js/map.js"></script>
+    <script src="/static/js/alerts.js"></script>
+</body>
+</html>

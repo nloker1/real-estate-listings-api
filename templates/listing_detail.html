@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ listing.address }} | Coos County Real Estate</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Prevents body scroll when lightbox is open */
+        .no-scroll { overflow: hidden; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+    <nav class="bg-white shadow-sm p-4 sticky top-0 z-40">
+        <div class="max-w-6xl mx-auto">
+            <a href="/map" class="text-blue-600 font-semibold hover:text-blue-800 transition">&larr; Back to Search Map</a>
+        </div>
+    </nav>
+
+    <main class="max-w-6xl mx-auto p-6">
+        <div class="flex flex-col md:flex-row justify-between items-start mb-6">
+            <div>
+                <h1 class="text-3xl font-bold">
+                    {% if listing.is_address_exposed %}
+                        {{ listing.address }}
+                    {% else %}
+                        Address Withheld at Seller's Request
+                    {% endif %}
+                </h1>
+                <p class="text-xl text-gray-600">{{ listing.city }}, OR</p>
+            </div>
+            <div class="text-right mt-4 md:mt-0">
+                <p class="text-4xl font-bold text-blue-800">${{ "{:,.0f}".format(listing.price) }}</p>
+                <p class="text-sm text-gray-500">MLS ID: #{{ listing.mls_number }}</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <div class="lg:col-span-2">
+                
+                <div class="rounded-lg overflow-hidden shadow-lg mb-4 bg-gray-200 aspect-video flex items-center justify-center relative group">
+                    {% if listing.images %}
+                        <img id="mainImage" src="{{ listing.images[0].url }}" alt="Property Image" 
+                             class="w-full h-full object-cover cursor-zoom-in" 
+                             onclick="openLightbox(0)">
+                    {% elif listing.photo_url %}
+                        <img id="mainImage" src="{{ listing.photo_url }}" alt="Property Image" class="w-full h-full object-cover">
+                    {% else %}
+                        <p class="text-gray-500">No Image Available</p>
+                    {% endif %}
+                </div>
+
+                {% if listing.images and listing.images|length > 1 %}
+                <div class="grid grid-cols-5 gap-2 mb-8">
+                    {% for image in listing.images[:5] %}
+                    <div class="relative aspect-square rounded overflow-hidden cursor-pointer border-2 {% if loop.first %}border-blue-500{% else %}border-transparent{% endif %} hover:border-blue-500 transition shadow-sm thumbnail-container">
+                        <img src="{{ image.url }}" 
+                             alt="Thumbnail {{ loop.index }}" 
+                             class="w-full h-full object-cover"
+                             onclick="changeImage('{{ image.url }}', {{ loop.index0 }}, this)">
+                        
+                        {# Show overlay on the 5th image if more exist #}
+                        {% if loop.index == 5 and listing.images|length > 5 %}
+                        <div onclick="openLightbox(4)" class="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white font-bold hover:bg-black/40 transition">
+                            <span class="text-xl">+{{ listing.images|length - 5 }}</span>
+                            <span class="text-[10px] uppercase tracking-tighter">More Photos</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 mb-8">
+                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">Property Details</h2>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <span class="block text-2xl font-bold">{{ listing.beds or '—' }}</span>
+                            <span class="text-xs uppercase text-gray-500">Beds</span>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <span class="block text-2xl font-bold">{{ listing.baths or '—' }}</span>
+                            <span class="text-xs uppercase text-gray-500">Baths</span>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <span class="block text-2xl font-bold">{{ "{:,.0f}".format(listing.sqft) if listing.sqft else '—' }}</span>
+                            <span class="text-xs uppercase text-gray-500">Sq Ft</span>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <span class="block text-2xl font-bold">{{ listing.year_built or '—' }}</span>
+                            <span class="text-xs uppercase text-gray-500">Year Built</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 mb-8">
+                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">Description</h2>
+                    <div class="prose max-w-none text-gray-700 leading-relaxed">
+                        <p style="white-space: pre-line;">
+                            {{ listing.public_remarks }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-6">
+                <div class="bg-blue-900 text-white p-6 rounded-lg shadow-md sticky top-24">
+                    <h3 class="text-lg font-bold mb-2">Interested in this property?</h3>
+                    <p class="text-sm mb-4 opacity-90">Schedule a showing or get more information about this Coos County listing.</p>
+                    <button class="w-full bg-white text-blue-900 font-bold py-3 rounded-md hover:bg-gray-100 transition shadow-lg">Contact Agent</button>
+                    
+                    <div class="mt-6 pt-6 border-t border-blue-800 text-xs opacity-70">
+                        <p>Listing Provided Courtesy of: <br><span class="font-bold uppercase tracking-wider">{{ listing.listing_brokerage or '[Brokerage Name]' }}</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="mt-12 pt-8 border-t border-gray-200">
+            <div class="flex flex-col md:flex-row items-center gap-4 text-xs text-gray-500 leading-relaxed">
+                <img src="/static/rmls_logo.jpg" alt="RMLS Logo" class="h-10">
+                <p>
+                    The content relating to real estate for sale on this web site comes in part from the IDX program of the RMLS™ of Portland, Oregon. Real estate listings held by brokerage firms other than Real Broker are marked with the RMLS™ logo, and detailed information about these properties includes the names of the listing brokers. <br>
+                    Listing content is copyright © 2026 RMLS™, Portland, Oregon. <br>
+                    IDX content is updated approximately every two hours. Some properties which appear for sale on this web site may subsequently have sold or may no longer be available. All information provided is deemed reliable but is not guaranteed and should be independently verified. <br>
+                    <strong>Last Updated:</strong> {{ listing.last_updated }}
+                </p>
+            </div>
+        </footer>
+    </main>
+
+    <div id="lightbox" class="fixed inset-0 bg-black/95 z-50 hidden flex flex-col items-center justify-center p-4">
+        <button onclick="closeLightbox()" class="absolute top-6 right-6 text-white text-4xl font-light z-50 hover:text-gray-300">&times;</button>
+        
+        <div class="relative w-full max-w-5xl flex items-center justify-center">
+            <button onclick="prevImage()" class="absolute left-0 text-white p-4 text-4xl hover:bg-white/10 rounded-full transition z-50">&lsaquo;</button>
+            <img id="lightboxImg" src="" class="max-h-[85vh] max-w-full object-contain shadow-2xl transition-all duration-300">
+            <button onclick="nextImage()" class="absolute right-0 text-white p-4 text-4xl hover:bg-white/10 rounded-full transition z-50">&rsaquo;</button>
+        </div>
+        <div id="imageCounter" class="text-white mt-6 font-mono text-sm tracking-widest bg-white/10 px-4 py-1 rounded-full"></div>
+    </div>
+
+    <script>
+        const allImages = [
+            {% for img in listing.images %}"{{ img.url }}"{% if not loop.last %},{% endif %}{% endfor %}
+        ];
+        
+        let currentIndex = 0;
+
+        function changeImage(url, index, el) {
+            currentIndex = index;
+            document.getElementById('mainImage').src = url;
+            document.querySelectorAll('.thumbnail-container').forEach(div => div.classList.replace('border-blue-500', 'border-transparent'));
+            if (el) el.parentElement.classList.replace('border-transparent', 'border-blue-500');
+        }
+
+        function openLightbox(index) {
+            currentIndex = index;
+            document.getElementById('lightbox').classList.remove('hidden');
+            document.body.classList.add('no-scroll');
+            updateLightbox();
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.add('hidden');
+            document.body.classList.remove('no-scroll');
+        }
+
+        function updateLightbox() {
+            const imgElement = document.getElementById('lightboxImg');
+            imgElement.src = allImages[currentIndex];
+            document.getElementById('imageCounter').innerText = `${currentIndex + 1} / ${allImages.length}`;
+        }
+
+        function nextImage() {
+            currentIndex = (currentIndex + 1) % allImages.length;
+            updateLightbox();
+        }
+
+        function prevImage() {
+            currentIndex = (currentIndex - 1 + allImages.length) % allImages.length;
+            updateLightbox();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (document.getElementById('lightbox').classList.contains('hidden')) return;
+            if (e.key === "Escape") closeLightbox();
+            if (e.key === "ArrowRight") nextImage();
+            if (e.key === "ArrowLeft") prevImage();
+        });
+    </script>
+</body>
+</html>

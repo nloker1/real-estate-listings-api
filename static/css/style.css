@@ -1,0 +1,40 @@
+:root {
+    --primary-color: #2c3e50;
+    --accent-color: #27ae60;
+    --save-color: #2980b9;
+}
+
+html, body { height: 100%; margin: 0; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
+#map { height: 100%; width: 100%; z-index: 1; }
+
+header {
+    position: absolute; top: 0; left: 0; right: 0;
+    background: white; z-index: 1000; padding: 12px 20px;
+    font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+#searchForm {
+    position: absolute; top: 70px; left: 20px; z-index: 1000;
+    background: white; padding: 15px; border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    display: flex; flex-direction: column; gap: 8px; width: 260px;
+}
+
+.price-inputs { display: flex; gap: 5px; }
+.price-inputs input { width: 50%; }
+
+input { padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
+
+.btn-group { display: flex; gap: 5px; }
+
+button {
+    flex: 1; padding: 12px; border: none; border-radius: 8px;
+    font-weight: bold; cursor: pointer; color: white;
+}
+
+#searchBtn { background: var(--accent-color); }
+#saveSearchBtn { background: var(--save-color); }
+
+@media (max-width: 600px) {
+    #searchForm { top: auto; bottom: 25px; left: 10px; right: 10px; width: auto; }
+}

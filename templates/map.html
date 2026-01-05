@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Search</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        /* This makes the map fill the screen */
+        #map { 
+            height: calc(100vh - 80px); 
+            width: 100%; 
+        }
+
+        /* POPUP STYLING */
+        .leaflet-popup-content {
+            margin: 0 !important;
+            width: 80vw !important;
+            width: 300px !important; 
+        }
+
+        .leaflet-popup {
+            margin-bottom: 20px;
+        }
+
+        .leaflet-popup-content a {
+            color: white !important;
+            text-decoration: none !important;
+        }
+
+        .leaflet-popup-content-wrapper {
+            padding: 0 !important;
+            overflow: hidden !important;
+            border-radius: 12px !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2) !important;
+        }
+
+        .leaflet-popup-tip {
+            background: white !important;
+        }
+
+        /* ZILLOW-STYLE PRICE MARKER */
+        .price-marker {
+            background-color: #1e40af; /* blue-800 */
+            color: white;
+            padding: 4px 7px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 12px;
+            border: 1px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            white-space: nowrap;
+            position: relative;
+            cursor: pointer;
+        }
+
+        /* The little arrow pointing down */
+        .price-marker::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 4px;
+            border-style: solid;
+            border-color: #1e40af transparent transparent transparent;
+        }
+
+        /* Hide the default white square background of DivIcon */
+        .custom-div-icon {
+            background: none !important;
+            border: none !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <nav class="bg-white shadow-md p-4 relative z-[1000]">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <h1 class="text-xl font-bold text-blue-900">Coos Bay Test Data</h1>
+        </div>
+    </nav>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 1. Initialize Map
+        const map = L.map('map').setView([43.3665, -124.2179], 10); // Centered on Coos Bay
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        let markersLayer = L.layerGroup().addTo(map);
+
+        // 2. Load Function
+        async function loadListings() {
+            console.log("Fetching listings...");
+            try {
+                const res = await fetch('/api/listings');
+                const listings = await res.json();
+                console.log("Found:", listings.length);
+
+                markersLayer.clearLayers();
+                
+                listings.forEach(l => {
+                    if (l.lat && l.lon) {
+                        
+                        // Format the price for the map pin (e.g. 450k)
+                        let displayPrice;
+                        if (l.price >= 1000000) {
+                            displayPrice = (l.price / 1000000).toFixed(1) + 'M';
+                        } else if (l.price >= 1000) {
+                            displayPrice = Math.round(l.price / 1000) + 'k';
+                        } else {
+                            displayPrice = l.price;
+                        }
+
+                        // Create the Price Pin Icon
+                        const priceIcon = L.divIcon({
+                            className: 'custom-div-icon',
+                            html: `<div class="price-marker">$${displayPrice}</div>`,
+                            iconSize: [45, 20],
+                            iconAnchor: [22, 20] 
+                        });
+
+                        // Your current popupHtml (unchanged)
+                        const popupHtml = `
+                            <div class="flex flex-col w-[300px] font-sans overflow-hidden">
+                                <div class="relative h-32 w-full">
+                                    <img src="${l.photo_url}" class="w-full h-full object-cover shadow-inner">
+                                    
+                                    <div class="absolute bottom-1 right-1 bg-white/80 p-0.5 rounded shadow-sm">
+                                        <img src="/static/rmls_logo.jpg" alt="RMLS" class="h-4 block opacity-90">
+                                    </div>
+                                </div>
+
+                                <div class="p-3 bg-white">
+                                    <div class="text-blue-900 font-bold text-lg leading-none mb-1">
+                                        $${(l.price || 0).toLocaleString()}
+                                    </div>
+
+                                    <h3 class="text-gray-800 font-bold text-base leading-tight mb-1">
+                                        ${l.address}
+                                    </h3>
+                                    
+                                    <div class="flex flex-col gap-0.5 mt-0.5 mb-3">
+                                        <p class="text-[10px] text-gray-400 truncate leading-tight">
+                                            <span class="font-medium text-gray-500"></span> ${l.listing_brokerage || 'RMLS Member Office'}
+                                        </p>
+                                    </div>
+                                    
+                                    <a href="/listing/${l.mls_number}" 
+                                       class="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-md text-xs tracking-wider uppercase shadow-md transition-colors duration-200">
+                                        View Details
+                                    </a>
+                                </div>
+                            </div>
+                        `;
+
+                        // Add marker with Price Icon
+                        L.marker([l.lat, l.lon], { icon: priceIcon })
+                            .bindPopup(popupHtml)
+                            .addTo(markersLayer);
+                    }
+                });
+            } catch (err) {
+                console.error("Error loading listings:", err);
+            }
+        }
+
+        // Run on load
+        loadListings();
+    </script>
+</body>
+</html>
