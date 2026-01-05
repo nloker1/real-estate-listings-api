@@ -6,7 +6,6 @@ certifi==2025.11.12
 charset-normalizer==3.4.4
 click==8.3.1
 dnspython==2.8.0
-dotenv==0.9.9
 email-validator==2.3.0
 fastapi==0.124.2
 geographiclib==2.1
