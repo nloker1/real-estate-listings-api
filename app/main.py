@@ -3,6 +3,7 @@ from fastapi import FastAPI, Depends, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,17 @@ app = FastAPI(
     version="0.1.0"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000", # Local React Dev Server
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"], # Allows GET, POST, OPTIONS, etc.
+    allow_headers=["*"], # Allows all headers
+)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -28,8 +40,8 @@ async def get_map_page(request: Request):
 def health():
     return {"status": "ok", "message": "API is running!"}
 
-@app.get("/listing/{mls_number}", response_class=HTMLResponse)
-async def get_listing(request: Request, mls_number: str, db: AsyncSession = Depends(get_db)):
+@app.get("/api/listings/{mls_number}")
+async def get_listing(mls_number: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Listing)
         .options(selectinload(Listing.images))
@@ -38,13 +50,9 @@ async def get_listing(request: Request, mls_number: str, db: AsyncSession = Depe
     listing = result.scalars().first()
     
     if not listing:
-        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+        return {"error": "Listing not found"}
 
-    return templates.TemplateResponse("listing_detail.html", {
-        "request": request, 
-        "listing": listing,
-        "current_date": datetime.now().strftime("%Y-%m-%d %H:%M")
-    })
+    return listing # FastAPI will automatically turn this into JSON
 
 # CLEANED UP LISTINGS ENDPOINT
 @app.get("/api/listings")
