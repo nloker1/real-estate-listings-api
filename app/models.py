@@ -11,24 +11,37 @@ class Listing(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     mls_number = Column(String, unique=True, index=True)
-    local_status = Column(String, nullable=True)
+    
+    # Status Fields
+    internal_status = Column(String, default='Active') # 'Active' or 'Inactive'
+    mls_status = Column(String, nullable=True)     # 'Active', 'Pending', 'Closed'
+    standard_status = Column(String, nullable=True)
+    status_change_timestamp = Column(DateTime, nullable=True)
+    
     photo_url = Column(String, nullable=True)
     address = Column(String, nullable=False)
     city = Column(String, nullable=False)
     price = Column(Numeric, nullable=True)
     beds = Column(Integer, nullable=True)
     baths = Column(Float, nullable=True)
-    sqft = Column(Integer, nullable=True)
+    sqft = Column(Integer, nullable=True)           # Maps to LivingArea
     year_built = Column(Integer, nullable=True)
-    acres = Column(Float, nullable=True)
-    lot_size = Column(String, nullable=True)
+    
+    # Land Fields
+    acreage = Column(Float, nullable=True)          # Maps to LotSizeAcres
+    lot_size_sqft = Column(Float, nullable=True)    # Maps to LotSizeSquareFeet
+    
     style = Column(String, nullable=True)
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)
-    is_new = Column(Boolean, default=True) # Add this line
+    is_new = Column(Boolean, default=True)
     is_address_exposed = Column(Boolean, default=False)
     listing_brokerage = Column(String, default='No Information Provided')
+    list_agent_name = Column(String, nullable=True)
+    property_type = Column(String, nullable=True)
+    property_sub_type = Column(String, nullable=True)
     public_remarks = Column(String, nullable=True)
+    
     last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     images = relationship("ListingImage", back_populates="listing", cascade="all, delete-orphan")
 
