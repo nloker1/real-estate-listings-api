@@ -42,6 +42,7 @@ class Listing(Base):
     property_sub_type = Column(String, nullable=True)
     public_remarks = Column(String, nullable=True)
     attribution_contact = Column(String, nullable=True)
+    zipcode = Column(String, nullable=True)
     
     last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     images = relationship("ListingImage", back_populates="listing", cascade="all, delete-orphan")

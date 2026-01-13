@@ -48,7 +48,7 @@ async def sync_rmls_listings():
             "Media", "ListOfficeName", "PublicRemarks", 
             "PropertyType", "PropertySubType", "ListAgentFullName",
             "StandardStatus", "MlsStatus", "StatusChangeTimestamp",
-            "AttributionContact"
+            "AttributionContact", "PostalCode"
         ]
         
         params = {
@@ -131,6 +131,7 @@ async def sync_rmls_listings():
                             status_change_timestamp=status_time_obj,
                             internal_status='Active',
                             attribution_contact=item.get('AttributionContact'),
+                            zipcode=item.get('PostalCode'),
                             is_new=True,
                             last_updated=current_time_pst
                         )
