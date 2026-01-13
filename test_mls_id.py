@@ -39,7 +39,14 @@ async def sync_rmls_listings():
             print("Error: RMLS_TOKEN not found.")
             return
 
-        # Explicitly defined fields based on your metadata
+        # ==========================================
+        # 🛠️ TEST MODE CONFIGURATION
+        # Add MLS numbers here as strings to test specific listings.
+        # Leave empty [] to run the normal full sync.
+        # ==========================================
+        TEST_MLS_IDS = ['519451808', '519451808', '311189733'] 
+        # ==========================================
+
         select_fields = [
             "ListingId", "ListPrice", "City", "UnparsedAddress",
             "BedroomsTotal", "BathsTotal", "Photo1URL", "Latitude",
@@ -51,11 +58,20 @@ async def sync_rmls_listings():
             "AttributionContact"
         ]
         
+        # --- DYNAMIC FILTER CONSTRUCTION ---
+        if TEST_MLS_IDS:
+            # Creates string: "ListingId eq '123' or ListingId eq '456'"
+            filter_str = " or ".join([f"ListingId eq '{mid}'" for mid in TEST_MLS_IDS])
+            print(f"⚠️ TEST MODE ACTIVE: Querying {len(TEST_MLS_IDS)} specific listings...")
+        else:
+            # Your original default filter
+            filter_str = "CountyOrParish eq Odata.Models.CountyOrParish'Coos' and StandardStatus eq Odata.Models.StandardStatus'Active'"
+
         params = {
-            "$filter": "CountyOrParish eq Odata.Models.CountyOrParish'Coos' and StandardStatus eq Odata.Models.StandardStatus'Active'",
+            "$filter": filter_str,
             "$select": ",".join(select_fields),
             "$expand": "Media",
-            "$top": 250 # Increased to ensure we capture all active listings
+            "$top": 250 
         }
         
         headers = {
@@ -65,7 +81,7 @@ async def sync_rmls_listings():
         }
 
         try:
-            print("Requesting active listings from RMLS...")
+            print(f"Requesting listings with filter: {filter_str}")
             async with httpx.AsyncClient() as client:
                 response = await client.get(base_url, headers=headers, params=params)
 
@@ -149,24 +165,24 @@ async def sync_rmls_listings():
                             if img_url:
                                 db.add(ListingImage(listing_id=target_listing.id, url=img_url, order=idx, is_private=is_private_val))
 
-                # --- 4. RECONCILIATION (Kill the Zombies) ---
-                # Any listing currently 'Active' that wasn't updated in this run is now off-market
-                if len(listings) > 0:
-                    # Ensure current_time_pst is definitely naive
-                    reconcile_time = current_time_pst.replace(tzinfo=None)
-
-                    stale_result = await db.execute(
-                        update(Listing)
-                        .where(Listing.last_updated < reconcile_time)
-                        .where(Listing.internal_status == 'Active')
-                        .values(
-                            internal_status='Inactive', 
-                            standard_status='Off-Market',
-                            # Force this to be naive to match the column type
-                            last_updated=reconcile_time 
+                # --- 4. RECONCILIATION (SAFETY CHECK) ---
+                # 🛑 ONLY RUN RECONCILIATION IF WE ARE NOT IN TEST MODE
+                if not TEST_MLS_IDS:
+                    if len(listings) > 0:
+                        reconcile_time = current_time_pst.replace(tzinfo=None)
+                        stale_result = await db.execute(
+                            update(Listing)
+                            .where(Listing.last_updated < reconcile_time)
+                            .where(Listing.internal_status == 'Active')
+                            .values(
+                                internal_status='Inactive', 
+                                standard_status='Off-Market',
+                                last_updated=reconcile_time 
+                            )
                         )
-                    )
-                    print(f"Reconciled {stale_result.rowcount} listings.")
+                        print(f"Reconciled {stale_result.rowcount} listings.")
+                else:
+                    print("⚠️ SKIPPING RECONCILIATION (Test Mode Active) - No listings were removed.")
 
                 await db.commit()
                 print(f"Sync complete at {current_time_pst} PST.")

@@ -41,6 +41,7 @@ class Listing(Base):
     property_type = Column(String, nullable=True)
     property_sub_type = Column(String, nullable=True)
     public_remarks = Column(String, nullable=True)
+    attribution_contact = Column(String, nullable=True)
     
     last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     images = relationship("ListingImage", back_populates="listing", cascade="all, delete-orphan")
@@ -52,6 +53,7 @@ class ListingImage(Base):
     listing_id = Column(Integer, ForeignKey("listings.id"), nullable=False)
     url = Column(String, nullable=False)
     order = Column(Integer, default=0)  # To keep the photos in the correct sequence
+    is_private = Column(Boolean, nullable=True)
 
     # NEW: Back-reference to the main listing
     listing = relationship("Listing", back_populates="images")
