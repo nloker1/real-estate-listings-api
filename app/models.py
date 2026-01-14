@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -59,24 +59,24 @@ class ListingImage(Base):
     # NEW: Back-reference to the main listing
     listing = relationship("Listing", back_populates="images")
 
+class Lead(Base):
+    __tablename__ = "leads"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=True)
+    phone = Column(String, unique=True, index=True, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_verified = Column(Boolean, default=False)
+
 class SavedSearch(Base):
     __tablename__ = "saved_searches"
-
     id = Column(Integer, primary_key=True, index=True)
-    user_email = Column(String, index=True, nullable=False)
+    lead_id = Column(Integer, ForeignKey("leads.id"))
     
-    # Search Criteria
-    city = Column(String, nullable=True)
-    min_price = Column(Float, nullable=True)
-    max_price = Column(Float, nullable=True)
-    min_beds = Column(Integer, nullable=True)
-    min_baths = Column(Float, nullable=True)
+    # Stores the actual filter: {"min_price": 500000, "zip": "97204", "beds": 3}
+    criteria = Column(JSON, nullable=False) 
     
-    # Notification Settings
-    is_active = Column(Boolean, default=True)
-    last_notified = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_modified = Column(DateTime(timezone=True), onupdate=func.now())
+    last_alert_sent_at = Column(DateTime, nullable=True) # To prevent spamming duplicate alerts
+    frequency = Column(String, default="instant") # "instant" or "daily"
 
 class EmailLog(Base):
     __tablename__ = "email_logs"
