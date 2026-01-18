@@ -110,7 +110,7 @@ async def get_listings(
 
     return output
 
-@app.post("/api/saved-searches", response_model=schemas.SavedSearchOut)
+@app.post("/api/saved-searches", response_model=schemas.SavedSearchCreate)
 async def create_saved_search(search: schemas.SavedSearchCreate, db: AsyncSession = Depends(get_db)):
     db_search = models.SavedSearch(**search.dict())
     db.add(db_search)

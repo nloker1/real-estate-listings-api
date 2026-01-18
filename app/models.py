@@ -61,22 +61,31 @@ class ListingImage(Base):
 
 class Lead(Base):
     __tablename__ = "leads"
+    
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=True)
     phone = Column(String, unique=True, index=True, nullable=True)
+    email = Column(String, unique=True, index=True, nullable=True)
+    name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    is_verified = Column(Boolean, default=False)
+    
+    # Relationship to searches
+    searches = relationship("SavedSearch", back_populates="lead")
 
 class SavedSearch(Base):
     __tablename__ = "saved_searches"
+    
     id = Column(Integer, primary_key=True, index=True)
     lead_id = Column(Integer, ForeignKey("leads.id"))
     
-    # Stores the actual filter: {"min_price": 500000, "zip": "97204", "beds": 3}
-    criteria = Column(JSON, nullable=False) 
+    # This stores the filters: {"min_price": 500000, "beds": 3, "zip": "98672"}
+    criteria = Column(JSON, nullable=False)
     
-    last_alert_sent_at = Column(DateTime, nullable=True) # To prevent spamming duplicate alerts
     frequency = Column(String, default="instant") # "instant" or "daily"
+    is_active = Column(Boolean, default=True)
+    last_alert_sent = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    lead = relationship("Lead", back_populates="searches")
 
 class EmailLog(Base):
     __tablename__ = "email_logs"

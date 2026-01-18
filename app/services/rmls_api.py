@@ -50,10 +50,44 @@ async def sync_rmls_listings():
             "StandardStatus", "MlsStatus", "StatusChangeTimestamp",
             "AttributionContact", "PostalCode"
         ]
+
+        gorge_zips = [
+            "97031", # Hood River, OR
+            "97041", # Parkdale/Mt Hood, OR
+            "97044", # Odell, OR
+            "97040", # Mosier, OR
+            "97014", # Cascade Locks, OR
+            "97058", # The Dalles, OR
+            "97021", # Dufur, OR
+            "98672", # White Salmon, WA
+            "98605", # Bingen, WA
+            "98651", # Underwood, WA
+            "98635", # Lyle, WA
+            "98650", # Trout Lake, WA
+            "98648", # Stevenson, WA
+            "98617", # Dallesport
+            "97028", # Government Camp
+            # "98620",  Goldendale, WA (Optional - might be too far east?) ]
+            ]
+
+        # 2. BUILD THE FILTER STRING DYNAMICALLY
+        # This creates: (PostalCode eq '97031' or PostalCode eq '97041' or ...)
+        zip_filter = " or ".join([f"PostalCode eq '{z}'" for z in gorge_zips])
+        
+        # Combined Filter: (Zip A or Zip B...) AND Status is Active
+        final_filter = f"({zip_filter}) and StandardStatus eq Odata.Models.StandardStatus'Active'"
+
+        # 3. SET THE PARAMS
+        params = {
+            "$filter": final_filter,
+            "$select": ",".join(select_fields),
+            "$expand": "Media",
+            "$top": 250 
+        }
         
         # Initial Parameters for the FIRST page
         params = {
-            "$filter": "CountyOrParish eq Odata.Models.CountyOrParish'Coos' and StandardStatus eq Odata.Models.StandardStatus'Active'",
+            "$filter": final_filter,
             "$select": ",".join(select_fields),
             "$expand": "Media",
             "$top": 250 

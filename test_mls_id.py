@@ -44,7 +44,7 @@ async def sync_rmls_listings():
         # Add MLS numbers here as strings to test specific listings.
         # Leave empty [] to run the normal full sync.
         # ==========================================
-        TEST_MLS_IDS = ['519451808', '519451808', '311189733'] 
+        TEST_MLS_IDS = ['519451808', '311189733'] 
         # ==========================================
 
         select_fields = [
