@@ -81,7 +81,7 @@ async def get_listings(
         Listing.photo_url,
         Listing.listing_brokerage,
         Listing.is_address_exposed # <--- Added for compliance check
-    ).where(Listing.internal_status == 'Active') # CRITICAL: Only show Active listings on map
+    ).where(Listing.status == 'Active') # CRITICAL: Only show Active listings on map
 
     # Apply filters
     if city:

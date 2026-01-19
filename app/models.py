@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey, JSON, Date, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -9,42 +9,80 @@ Base = declarative_base()
 class Listing(Base):
     __tablename__ = "listings"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, index=True)
     mls_number = Column(String, unique=True, index=True)
+
+    # --- STATUS & VISIBILITY ---
+    status = Column(String, index=True)  
+    detailed_status = Column(String, nullable=True) 
+    status_date = Column(DateTime, nullable=True)
+    days_on_market = Column(Integer, nullable=True)
+    is_published = Column(Boolean, default=True)
     
-    # Status Fields
-    internal_status = Column(String, default='Active') # 'Active' or 'Inactive'
-    mls_status = Column(String, nullable=True)     # 'Active', 'Pending', 'Closed'
-    standard_status = Column(String, nullable=True)
-    status_change_timestamp = Column(DateTime, nullable=True)
+    # Sold Data (Optional for now since we are reverting filter)
+    close_price = Column(Integer, nullable=True)
+    close_date = Column(Date, nullable=True)
+
+    # --- LOCATION ---
+    address = Column(String)
+    city = Column(String, index=True)
+    zipcode = Column(String, index=True)
+    lat = Column(Float)
+    lon = Column(Float)
+    is_address_exposed = Column(Boolean, default=True)
     
-    photo_url = Column(String, nullable=True)
-    address = Column(String, nullable=False)
-    city = Column(String, nullable=False)
-    price = Column(Numeric, nullable=True)
-    beds = Column(Integer, nullable=True)
-    baths = Column(Float, nullable=True)
-    sqft = Column(Integer, nullable=True)           # Maps to LivingArea
-    year_built = Column(Integer, nullable=True)
+    # New Location Fields
+    mls_area_major = Column(String, nullable=True)
+    elementary_school = Column(String, nullable=True)
+    middle_or_junior_school = Column(String, nullable=True) # New!
+    high_school = Column(String, nullable=True)
+    zoning = Column(String, nullable=True)
+
+    # --- BASIC SPECS ---
+    price = Column(Integer)
+    beds = Column(Integer)
+    baths = Column(Float)
+    sqft = Column(Integer)
+    lot_size_sqft = Column(Float)
+    acreage = Column(Float)
+    year_built = Column(Integer)
+    garage_spaces = Column(Float, nullable=True) 
+
+    # --- EXPANDED DETAILS ---
+    property_type = Column(String)
+    property_sub_type = Column(String)
+    photo_url = Column(String)
+    public_remarks = Column(Text)
     
-    # Land Fields
-    acreage = Column(Float, nullable=True)          # Maps to LotSizeAcres
-    lot_size_sqft = Column(Float, nullable=True)    # Maps to LotSizeSquareFeet
-    
-    style = Column(String, nullable=True)
-    lat = Column(Float, nullable=True)
-    lon = Column(Float, nullable=True)
-    is_new = Column(Boolean, default=True)
-    is_address_exposed = Column(Boolean, default=False)
-    listing_brokerage = Column(String, default='No Information Provided')
-    list_agent_name = Column(String, nullable=True)
-    property_type = Column(String, nullable=True)
-    property_sub_type = Column(String, nullable=True)
-    public_remarks = Column(String, nullable=True)
-    attribution_contact = Column(String, nullable=True)
-    zipcode = Column(String, nullable=True)
-    
-    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    # Mechanicals
+    cooling = Column(String, nullable=True)
+    heating = Column(String, nullable=True)
+    fuel_description = Column(String, nullable=True)
+    roof = Column(String, nullable=True)
+    sewer = Column(String, nullable=True)
+    water_source = Column(String, nullable=True)
+    utilities = Column(String, nullable=True)
+
+    # --- AGENT DATA ---
+    listing_brokerage = Column(String)
+    list_agent_name = Column(String)
+    buyer_agent_name = Column(String, nullable=True)
+    attribution_contact = Column(String)
+
+    # --- FINANCIALS ---
+    tax_annual_amount = Column(Integer, nullable=True)
+    tax_legal_description = Column(Text, nullable=True)
+    association_fee = Column(Integer, nullable=True)
+    association_yn = Column(Boolean, nullable=True)
+    gross_income = Column(Integer, nullable=True)
+    list_price_high = Column(Integer, nullable=True)
+    list_price_low = Column(Integer, nullable=True)
+
+    # --- SYSTEM ---
+    is_new = Column(Boolean, default=False)
+    created_at = Column(DateTime, nullable=True)
+    last_updated = Column(DateTime, nullable=True)
+
     images = relationship("ListingImage", back_populates="listing", cascade="all, delete-orphan")
 
 class ListingImage(Base):

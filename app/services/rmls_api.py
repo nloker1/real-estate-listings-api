@@ -10,7 +10,7 @@ from dateutil import parser
 # Load environment variables
 load_dotenv()
 
-# Setup path to find app folder
+# Setup path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models import Listing, ListingImage
@@ -21,7 +21,6 @@ from sqlalchemy.orm import configure_mappers
 configure_mappers()
 
 def get_pst_now():
-    """Returns current PST time as a naive datetime object for DB compatibility."""
     return datetime.now(ZoneInfo("America/Los_Angeles")).replace(tzinfo=None)
 
 def safe_float(value):
@@ -29,6 +28,14 @@ def safe_float(value):
         return float(value) if value is not None else None
     except (ValueError, TypeError):
         return None
+
+# Simple normalizer (Since we are only pulling Active, this is just a safeguard)
+def normalize_status(std_status):
+    if not std_status: return 'Active'
+    s = std_status.lower()
+    if 'closed' in s or 'sold' in s: return 'Sold'
+    if 'pending' in s or 'contract' in s: return 'Pending'
+    return 'Active'
 
 async def sync_rmls_listings():
     async with AsyncSessionLocal() as db:
@@ -39,53 +46,41 @@ async def sync_rmls_listings():
             print("❌ Error: RMLS_TOKEN not found.")
             return
 
-        # Explicitly defined fields based on your metadata
+        # --- 1. EXPANDED FIELD LIST ---
         select_fields = [
-            "ListingId", "ListPrice", "City", "UnparsedAddress",
-            "BedroomsTotal", "BathsTotal", "Photo1URL", "Latitude",
-            "Longitude", "IDXAddressDisplayYn", "BuildingAreaTotal",
-            "LotSizeSquareFeet", "LotSizeAcres", "YearBuilt", 
-            "Media", "ListOfficeName", "PublicRemarks", 
-            "PropertyType", "PropertySubType", "ListAgentFullName",
-            "StandardStatus", "MlsStatus", "StatusChangeTimestamp",
-            "AttributionContact", "PostalCode"
+            # Core
+            "ListingId", "ListPrice", "City", "UnparsedAddress", 
+            "BedroomsTotal", "BathsTotal", "Photo1URL", "Latitude", "Longitude", 
+            "IDXAddressDisplayYn", "BuildingAreaTotal", "LotSizeSquareFeet", 
+            "LotSizeAcres", "YearBuilt", "DaysOnMarket", "Media", "PublicRemarks", 
+            "PropertyType", "PropertySubType", "StandardStatus", "MlsStatus", 
+            "StatusChangeTimestamp", "PostalCode",
+            
+            # Agents
+            "ListOfficeName", "ListAgentFullName", "BuyerAgentFullName", 
+            "AttributionContact", 
+            
+            # New Details
+            "TaxAnnualAmount", "AssociationFee", "AssociationYn", 
+            "Cooling", "ElementarySchool", "MiddleOrJuniorSchool", # <--- Added
+            "FuelDescription", "GarageSpaces", "GrossIncome", "Heating", 
+            "HighSchool", "ListPriceHigh", "ListPriceLow", "MLSAreaMajor", 
+            "Roof", "Sewer", "TaxLegalDescription", "Utilities", 
+            "WaterSource", "Zoning"
         ]
 
         gorge_zips = [
-            "97031", # Hood River, OR
-            "97041", # Parkdale/Mt Hood, OR
-            "97044", # Odell, OR
-            "97040", # Mosier, OR
-            "97014", # Cascade Locks, OR
-            "97058", # The Dalles, OR
-            "97021", # Dufur, OR
-            "98672", # White Salmon, WA
-            "98605", # Bingen, WA
-            "98651", # Underwood, WA
-            "98635", # Lyle, WA
-            "98650", # Trout Lake, WA
-            "98648", # Stevenson, WA
-            "98617", # Dallesport
-            "97028", # Government Camp
-            # "98620",  Goldendale, WA (Optional - might be too far east?) ]
-            ]
+            "97031", "97041", "97044", "97040", "97014", "97058", "97021", 
+            "97028", "98672", "98605", "98651", "98635", "98650", "98648", "98617"
+        ]
 
-        # 2. BUILD THE FILTER STRING DYNAMICALLY
-        # This creates: (PostalCode eq '97031' or PostalCode eq '97041' or ...)
+        # --- 2. SAFE FILTER (Active Only) ---
+        # This matches your original working logic
         zip_filter = " or ".join([f"PostalCode eq '{z}'" for z in gorge_zips])
         
-        # Combined Filter: (Zip A or Zip B...) AND Status is Active
+        # We use the robust Odata syntax just to be safe, but keep logic simple
         final_filter = f"({zip_filter}) and StandardStatus eq Odata.Models.StandardStatus'Active'"
 
-        # 3. SET THE PARAMS
-        params = {
-            "$filter": final_filter,
-            "$select": ",".join(select_fields),
-            "$expand": "Media",
-            "$top": 250 
-        }
-        
-        # Initial Parameters for the FIRST page
         params = {
             "$filter": final_filter,
             "$select": ",".join(select_fields),
@@ -99,164 +94,170 @@ async def sync_rmls_listings():
             "Accept": "application/json"
         }
 
-        # --- 1. PAGINATION LOOP (THE DOWNLOADER) ---
+        # --- DOWNLOAD LOOP ---
         all_listings = []
         url_to_fetch = base_url
         params_to_use = params
         page_count = 1
 
-        print("🚀 Starting RMLS Download...")
+        print("🚀 Starting Sync (Active Listings Only + New Data)...")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             while url_to_fetch:
-                print(f"   ⬇️ Fetching Page {page_count}...")
-                
+                print(f"   ⬇️ Page {page_count}...")
                 try:
                     response = await client.get(url_to_fetch, headers=headers, params=params_to_use)
                     
                     if response.status_code != 200:
-                        print(f"❌ Critical API Error on Page {page_count}: {response.status_code}")
-                        print(response.text)
+                        print(f"❌ Critical API Error: {response.status_code}")
+                        print("👇 ERROR DETAILS 👇")
+                        print(response.text) # <--- READ THIS IF IT FAILS
                         return 
 
                     data = response.json()
                     batch = data.get('value', [])
-                    
-                    if not batch:
-                        print("   ⚠️ Page returned empty list. Stopping download.")
-                        break
+                    if not batch: break
 
-                    count = len(batch)
-                    print(f"   ✅ Got {count} listings.")
                     all_listings.extend(batch)
-
-                    # CHECK FOR NEXT LINK
-                    # RESO standard is usually '@odata.nextLink'
                     next_link = data.get('@odata.nextLink')
 
                     if next_link:
                         url_to_fetch = next_link
-                        # CRITICAL: Next link already has params embedded, so we MUST clear ours
-                        # otherwise we send conflicting parameters and break the API.
                         params_to_use = None 
                         page_count += 1
                     else:
-                        print("   🏁 No Next Link found. Download complete.")
-                        url_to_fetch = None # Breaks the loop
+                        url_to_fetch = None
 
                 except Exception as e:
-                    print(f"❌ Exception in fetch loop: {e}")
+                    print(f"❌ Exception: {e}")
                     return
 
-        # --- 2. PROCESSING LOOP (THE UPDATER) ---
-        # Now we process everything we downloaded
-        listings = all_listings
+        # --- UPDATE LOOP ---
         current_time_pst = get_pst_now()
-        
-        print(f"\n📦 Processing Total: {len(listings)} Listings...")
-        
-        if len(listings) == 0:
-            print("❌ No listings found to process. Exiting.")
-            return
-
         new_count = 0
         updated_count = 0
+        
+        print(f"\n📦 Processing {len(all_listings)} Listings...")
 
-        for item in listings:
+        for item in all_listings:
             mls_id = str(item.get('ListingId'))
-            
-            # A. Check if listing exists
             result = await db.execute(select(Listing).filter(Listing.mls_number == mls_id))
             existing_listing = result.scalars().first()
 
-            # B. Data cleaning
             raw_status_time = item.get('StatusChangeTimestamp')
             status_time_obj = parser.isoparse(raw_status_time).replace(tzinfo=None) if raw_status_time else None
             
-            baths_val = safe_float(item.get('BathsTotal'))
-            beds_val = int(safe_float(item.get('BedroomsTotal'))) if item.get('BedroomsTotal') else None
-            sqft_val = int(safe_float(item.get('BuildingAreaTotal'))) if item.get('BuildingAreaTotal') else None
+            clean_status = normalize_status(item.get('StandardStatus'))
 
-            # C. Update or Create
+            listing_data = {
+                # CORE
+                "price": item.get('ListPrice'),
+                "status": clean_status,
+                "detailed_status": item.get('MlsStatus'),
+                "status_date": status_time_obj,
+                "days_on_market": item.get('DaysOnMarket'),
+                "is_published": True,
+                "last_updated": current_time_pst,
+                
+                # ADDRESS
+                "city": item.get('City'),
+                "address": item.get('UnparsedAddress'),
+                "zipcode": item.get('PostalCode'),
+                "lat": item.get('Latitude'),
+                "lon": item.get('Longitude'),
+                "is_address_exposed": item.get('IDXAddressDisplayYn'),
+                
+                # BASIC STATS
+                "baths": safe_float(item.get('BathsTotal')),
+                "beds": int(safe_float(item.get('BedroomsTotal'))) if item.get('BedroomsTotal') else None,
+                "sqft": int(safe_float(item.get('BuildingAreaTotal'))) if item.get('BuildingAreaTotal') else None,
+                "year_built": item.get('YearBuilt'),
+                "acreage": safe_float(item.get('LotSizeAcres')),
+                "lot_size_sqft": safe_float(item.get('LotSizeSquareFeet')),
+                
+                # AGENTS
+                "listing_brokerage": item.get('ListOfficeName'),
+                "list_agent_name": item.get('ListAgentFullName'),
+                "buyer_agent_name": item.get('BuyerAgentFullName'), 
+                "attribution_contact": item.get('AttributionContact'),
+                
+                # DESCRIPTIONS
+                "public_remarks": item.get('PublicRemarks'),
+                "property_type": item.get('PropertyType'),
+                "property_sub_type": item.get('PropertySubType'),
+                "tax_legal_description": item.get('TaxLegalDescription'),
+                
+                # FINANCIALS
+                "tax_annual_amount": safe_float(item.get('TaxAnnualAmount')),
+                "association_fee": safe_float(item.get('AssociationFee')),
+                "association_yn": item.get('AssociationYn'),
+                "gross_income": safe_float(item.get('GrossIncome')),
+                "list_price_high": safe_float(item.get('ListPriceHigh')),
+                "list_price_low": safe_float(item.get('ListPriceLow')),
+                
+                # DETAILS
+                "garage_spaces": safe_float(item.get('GarageSpaces')),
+                "cooling": _list_to_str(item.get('Cooling')), 
+                "heating": _list_to_str(item.get('Heating')),
+                "fuel_description": _list_to_str(item.get('FuelDescription')),
+                "roof": _list_to_str(item.get('Roof')),
+                "sewer": _list_to_str(item.get('Sewer')),
+                "water_source": _list_to_str(item.get('WaterSource')),
+                "utilities": _list_to_str(item.get('Utilities')),
+                
+                # SCHOOLS & AREA
+                "elementary_school": item.get('ElementarySchool'),
+                "middle_or_junior_school": item.get('MiddleOrJuniorSchool'), # <--- Added
+                "high_school": item.get('HighSchool'),
+                "mls_area_major": item.get('MLSAreaMajor'),
+                "zoning": item.get('Zoning'),
+            }
+
             if existing_listing:
-                existing_listing.price = item.get('ListPrice')
-                existing_listing.baths = baths_val
-                existing_listing.beds = beds_val
-                existing_listing.sqft = sqft_val
-                existing_listing.standard_status = item.get('StandardStatus')
-                existing_listing.mls_status = item.get('MlsStatus')
-                existing_listing.status_change_timestamp = status_time_obj
-                existing_listing.internal_status = 'Active'
-                existing_listing.last_updated = current_time_pst 
+                for key, value in listing_data.items():
+                    setattr(existing_listing, key, value)
+                updated_count += 1
                 target_listing = existing_listing
-                updated_count += 1 
             else:
-                new_listing = Listing(
-                    mls_number=mls_id,
-                    price=item.get('ListPrice'),
-                    city=item.get('City'),
-                    address=item.get('UnparsedAddress'),
-                    baths=baths_val,
-                    beds=beds_val,
-                    sqft=sqft_val,
-                    lat=item.get('Latitude'),
-                    lon=item.get('Longitude'),
-                    photo_url=item.get('Photo1URL'),
-                    year_built=item.get('YearBuilt'),
-                    acreage=safe_float(item.get('LotSizeAcres')),
-                    lot_size_sqft=safe_float(item.get('LotSizeSquareFeet')),
-                    is_address_exposed=item.get('IDXAddressDisplayYn'),
-                    listing_brokerage=item.get('ListOfficeName'),
-                    public_remarks=item.get('PublicRemarks'),
-                    property_type=item.get('PropertyType'),
-                    property_sub_type=item.get('PropertySubType'),
-                    list_agent_name=item.get('ListAgentFullName'),
-                    standard_status=item.get('StandardStatus'),
-                    mls_status=item.get('MlsStatus'),
-                    status_change_timestamp=status_time_obj,
-                    internal_status='Active',
-                    attribution_contact=item.get('AttributionContact'),
-                    zipcode=item.get('PostalCode'),
-                    is_new=True,
-                    last_updated=current_time_pst
-                )
+                new_listing = Listing(mls_number=mls_id, is_new=True, **listing_data)
                 db.add(new_listing)
-                await db.flush() 
+                await db.flush()
                 target_listing = new_listing
                 print(f" [NEW]    MLS#: {mls_id} - {item.get('UnparsedAddress')}")
-                new_count += 1 
 
-            # D. Media Handling
+                new_count += 1
+
+            # Media Sync
             media_data = item.get('Media', [])
             if media_data:
                 await db.execute(delete(ListingImage).where(ListingImage.listing_id == target_listing.id))
                 for idx, m in enumerate(media_data):
-                    img_url = m.get('MediaURL')
-                    is_private_val = m.get('PrivateYn', None)
-                    if img_url:
-                        db.add(ListingImage(listing_id=target_listing.id, url=img_url, order=idx, is_private=is_private_val))
+                    if m.get('MediaURL'):
+                        db.add(ListingImage(listing_id=target_listing.id, url=m.get('MediaURL'), order=idx, is_private=m.get('PrivateYn')))
 
-        # --- 3. SUMMARY & RECONCILIATION ---
-        # NOTE: This section is OUTSIDE the 'for' loop.
-        print(f"SUMMARY: {new_count} New | {updated_count} Updated | {len(listings)} Processed")
-
-        # Reconciliation: Mark missing Active listings as Off-Market
-        if len(listings) > 0:
+        # --- RECONCILIATION ---
+        # Safe Version: Only marks Active listings as Inactive if they disappear
+        if len(all_listings) > 0:
             reconcile_time = current_time_pst.replace(tzinfo=None)
             stale_result = await db.execute(
                 update(Listing)
                 .where(Listing.last_updated < reconcile_time)
-                .where(Listing.internal_status == 'Active')
+                .where(Listing.status == 'Active') 
                 .values(
-                    internal_status='Inactive', 
-                    standard_status='Off-Market',
-                    last_updated=reconcile_time 
+                    status='Off-Market',        
+                    is_published=False,         
+                    last_updated=reconcile_time
                 )
             )
-            print(f"Reconciled {stale_result.rowcount} listings.")
+            print(f"Reconciled {stale_result.rowcount} listings to Off-Market.")
 
         await db.commit()
-        print(f"✅ Sync complete at {current_time_pst} PST.")
+        print(f"✅ Sync complete.")
+
+def _list_to_str(val):
+    if isinstance(val, list):
+        return ", ".join(str(x) for x in val)
+    return str(val) if val else None
 
 if __name__ == "__main__":
     asyncio.run(sync_rmls_listings())
