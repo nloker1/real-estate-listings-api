@@ -182,6 +182,7 @@ async def sync_rmls_listings():
                 "attribution_contact": item.get('AttributionContact'),
                 
                 # DESCRIPTIONS
+                "photo_url": item.get('Photo1URL'),
                 "public_remarks": item.get('PublicRemarks'),
                 "property_type": item.get('PropertyType'),
                 "property_sub_type": item.get('PropertySubType'),
@@ -224,7 +225,6 @@ async def sync_rmls_listings():
                 await db.flush()
                 target_listing = new_listing
                 print(f" [NEW]    MLS#: {mls_id} - {item.get('UnparsedAddress')}")
-
                 new_count += 1
 
             # Media Sync
