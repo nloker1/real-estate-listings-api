@@ -26,6 +26,9 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://lokerrealty.com", # <--- Replace with your actual domain
+        "https://www.lokerrealty.com",
+        "https://gorgerealty.com",      # <--- New
+        "https://www.gorgerealty.com"   # <--- New
     ],
     allow_credentials=True,
     allow_methods=["*"],

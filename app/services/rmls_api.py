@@ -3,24 +3,25 @@ import os
 import httpx
 import asyncio
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dateutil import parser
 
 # Load environment variables
 load_dotenv()
 
-# Setup path
+# Setup path to find app folder
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models import Listing, ListingImage
 from app.database import AsyncSessionLocal
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete
 from sqlalchemy.orm import configure_mappers
 
 configure_mappers()
 
 def get_pst_now():
+    """Returns current PST time as a naive datetime object."""
     return datetime.now(ZoneInfo("America/Los_Angeles")).replace(tzinfo=None)
 
 def safe_float(value):
@@ -29,12 +30,33 @@ def safe_float(value):
     except (ValueError, TypeError):
         return None
 
-# Simple normalizer (Since we are only pulling Active, this is just a safeguard)
+def _list_to_str(val):
+    """Helper to convert lists (like ['Gas', 'Wood']) to strings."""
+    if isinstance(val, list):
+        return ", ".join(str(x) for x in val)
+    return str(val) if val else None
+
+# --- STATUS NORMALIZER ---
+# Maps raw RMLS statuses to your internal buckets
 def normalize_status(std_status):
-    if not std_status: return 'Active'
+    if not std_status:
+        return 'Active'
+        
     s = std_status.lower()
-    if 'closed' in s or 'sold' in s: return 'Sold'
-    if 'pending' in s or 'contract' in s: return 'Pending'
+    
+    # 1. SOLD
+    if 'closed' in s or 'sold' in s:
+        return 'Sold'
+        
+    # 2. PENDING
+    if 'pending' in s or 'contract' in s or 'activeundercontract' in s:
+        return 'Pending'
+
+    # 3. DEAD LEADS (New!)
+    if 'expired' in s or 'withdrawn' in s or 'canceled' in s:
+        return 'Off-Market'
+        
+    # 4. ACTIVE
     return 'Active'
 
 async def sync_rmls_listings():
@@ -49,12 +71,12 @@ async def sync_rmls_listings():
         # --- 1. EXPANDED FIELD LIST ---
         select_fields = [
             # Core
-            "ListingId", "ListPrice", "City", "UnparsedAddress", 
-            "BedroomsTotal", "BathsTotal", "Photo1URL", "Latitude", "Longitude", 
-            "IDXAddressDisplayYn", "BuildingAreaTotal", "LotSizeSquareFeet", 
-            "LotSizeAcres", "YearBuilt", "DaysOnMarket", "Media", "PublicRemarks", 
-            "PropertyType", "PropertySubType", "StandardStatus", "MlsStatus", 
-            "StatusChangeTimestamp", "PostalCode",
+            "ListingId", "ListPrice", "ClosePrice", "CloseDate", "City", 
+            "UnparsedAddress", "BedroomsTotal", "BathsTotal", "Photo1URL", 
+            "Latitude", "Longitude", "IDXAddressDisplayYn", "BuildingAreaTotal",
+            "LotSizeSquareFeet", "LotSizeAcres", "YearBuilt", "DaysOnMarket",
+            "Media", "PublicRemarks", "PropertyType", "PropertySubType",
+            "StandardStatus", "MlsStatus", "StatusChangeTimestamp", "PostalCode",
             
             # Agents
             "ListOfficeName", "ListAgentFullName", "BuyerAgentFullName", 
@@ -62,24 +84,41 @@ async def sync_rmls_listings():
             
             # New Details
             "TaxAnnualAmount", "AssociationFee", "AssociationYn", 
-            "Cooling", "ElementarySchool", "MiddleOrJuniorSchool", # <--- Added
+            "Cooling", "ElementarySchool", "MiddleOrJuniorSchool", 
             "FuelDescription", "GarageSpaces", "GrossIncome", "Heating", 
             "HighSchool", "ListPriceHigh", "ListPriceLow", "MLSAreaMajor", 
-            "Roof", "Sewer", "TaxLegalDescription", "Utilities", 
-            "WaterSource", "Zoning"
+            "Roof", "Sewer", "TaxLegalDescription", "Utilities", "WaterSource", "Zoning"
         ]
 
         gorge_zips = [
-            "97031", "97041", "97044", "97040", "97014", "97058", "97021", 
-            "97028", "98672", "98605", "98651", "98635", "98650", "98648", "98617"
+            "97031", "97041", "97044", "97040", "97014", "97058", "97021", "97028",
+            "98672", "98605", "98651", "98635", "98650", "98648", "98617"
         ]
 
-        # --- 2. SAFE FILTER (Active Only) ---
-        # This matches your original working logic
+        # --- 2. FILTER CONSTRUCTION ---
         zip_filter = " or ".join([f"PostalCode eq '{z}'" for z in gorge_zips])
         
-        # We use the robust Odata syntax just to be safe, but keep logic simple
-        final_filter = f"({zip_filter}) and StandardStatus eq Odata.Models.StandardStatus'Active'"
+        # Time Calculations (Crucial for avoiding Type Errors)
+        # For StatusChangeTimestamp (Needs T00:00:00Z)
+        timestamp_30_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%dT00:00:00Z')
+
+        # For CloseDate (Needs DATE ONLY yyyy-mm-dd)
+        date_90_days_ago = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+
+        status_filter = (
+            # 1. LIVE STUFF (Active & Pending)
+            "(StandardStatus eq Odata.Models.StandardStatus'Active') or "
+            "(StandardStatus eq Odata.Models.StandardStatus'ActiveUnderContract') or "
+            "(StandardStatus eq Odata.Models.StandardStatus'Pending') or "
+            
+            # 2. SOLD STUFF (Last 90 days)
+            f"(StandardStatus eq Odata.Models.StandardStatus'Closed' and CloseDate ge {date_90_days_ago}) or "
+
+            # 3. DEAD STUFF (Last 30 days - HOT LEADS)
+            f"((StandardStatus eq Odata.Models.StandardStatus'Expired' or StandardStatus eq Odata.Models.StandardStatus'Canceled' or StandardStatus eq Odata.Models.StandardStatus'Withdrawn') and StatusChangeTimestamp ge {timestamp_30_days_ago})"
+        )
+
+        final_filter = f"({zip_filter}) and ({status_filter})"
 
         params = {
             "$filter": final_filter,
@@ -94,13 +133,13 @@ async def sync_rmls_listings():
             "Accept": "application/json"
         }
 
-        # --- DOWNLOAD LOOP ---
+        # --- 3. DOWNLOAD LOOP ---
         all_listings = []
         url_to_fetch = base_url
         params_to_use = params
         page_count = 1
 
-        print("🚀 Starting Sync (Active Listings Only + New Data)...")
+        print("🚀 Starting Sync (Active + Pending + Sold + Off-Market)...")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             while url_to_fetch:
@@ -111,7 +150,7 @@ async def sync_rmls_listings():
                     if response.status_code != 200:
                         print(f"❌ Critical API Error: {response.status_code}")
                         print("👇 ERROR DETAILS 👇")
-                        print(response.text) # <--- READ THIS IF IT FAILS
+                        print(response.text)
                         return 
 
                     data = response.json()
@@ -132,7 +171,7 @@ async def sync_rmls_listings():
                     print(f"❌ Exception: {e}")
                     return
 
-        # --- UPDATE LOOP ---
+        # --- 4. PROCESSING LOOP ---
         current_time_pst = get_pst_now()
         new_count = 0
         updated_count = 0
@@ -144,19 +183,33 @@ async def sync_rmls_listings():
             result = await db.execute(select(Listing).filter(Listing.mls_number == mls_id))
             existing_listing = result.scalars().first()
 
+            # Time Parsing
             raw_status_time = item.get('StatusChangeTimestamp')
             status_time_obj = parser.isoparse(raw_status_time).replace(tzinfo=None) if raw_status_time else None
             
-            clean_status = normalize_status(item.get('StandardStatus'))
+            close_date = None
+            if item.get('CloseDate'):
+                 close_date = parser.isoparse(item.get('CloseDate')).date()
 
+            # Status Normalization & Visibility
+            clean_status = normalize_status(item.get('StandardStatus'))
+            
+            # LOGIC: If it's Off-Market, hide it from the public map.
+            should_publish = True
+            if clean_status == 'Off-Market':
+                should_publish = False
+
+            # Map Data
             listing_data = {
                 # CORE
                 "price": item.get('ListPrice'),
                 "status": clean_status,
                 "detailed_status": item.get('MlsStatus'),
                 "status_date": status_time_obj,
+                "close_price": item.get('ClosePrice') if clean_status == 'Sold' else None,
+                "close_date": close_date,
                 "days_on_market": item.get('DaysOnMarket'),
-                "is_published": True,
+                "is_published": should_publish,
                 "last_updated": current_time_pst,
                 
                 # ADDRESS
@@ -166,7 +219,7 @@ async def sync_rmls_listings():
                 "lat": item.get('Latitude'),
                 "lon": item.get('Longitude'),
                 "is_address_exposed": item.get('IDXAddressDisplayYn'),
-                
+
                 # BASIC STATS
                 "baths": safe_float(item.get('BathsTotal')),
                 "beds": int(safe_float(item.get('BedroomsTotal'))) if item.get('BedroomsTotal') else None,
@@ -182,7 +235,6 @@ async def sync_rmls_listings():
                 "attribution_contact": item.get('AttributionContact'),
                 
                 # DESCRIPTIONS
-                "photo_url": item.get('Photo1URL'),
                 "public_remarks": item.get('PublicRemarks'),
                 "property_type": item.get('PropertyType'),
                 "property_sub_type": item.get('PropertySubType'),
@@ -208,7 +260,7 @@ async def sync_rmls_listings():
                 
                 # SCHOOLS & AREA
                 "elementary_school": item.get('ElementarySchool'),
-                "middle_or_junior_school": item.get('MiddleOrJuniorSchool'), # <--- Added
+                "middle_or_junior_school": item.get('MiddleOrJuniorSchool'),
                 "high_school": item.get('HighSchool'),
                 "mls_area_major": item.get('MLSAreaMajor'),
                 "zoning": item.get('Zoning'),
@@ -235,29 +287,10 @@ async def sync_rmls_listings():
                     if m.get('MediaURL'):
                         db.add(ListingImage(listing_id=target_listing.id, url=m.get('MediaURL'), order=idx, is_private=m.get('PrivateYn')))
 
-        # --- RECONCILIATION ---
-        # Safe Version: Only marks Active listings as Inactive if they disappear
-        if len(all_listings) > 0:
-            reconcile_time = current_time_pst.replace(tzinfo=None)
-            stale_result = await db.execute(
-                update(Listing)
-                .where(Listing.last_updated < reconcile_time)
-                .where(Listing.status == 'Active') 
-                .values(
-                    status='Off-Market',        
-                    is_published=False,         
-                    last_updated=reconcile_time
-                )
-            )
-            print(f"Reconciled {stale_result.rowcount} listings to Off-Market.")
-
+        # --- 5. COMMIT ---
         await db.commit()
+        print(f"SUMMARY: {new_count} New | {updated_count} Updated")
         print(f"✅ Sync complete.")
-
-def _list_to_str(val):
-    if isinstance(val, list):
-        return ", ".join(str(x) for x in val)
-    return str(val) if val else None
 
 if __name__ == "__main__":
     asyncio.run(sync_rmls_listings())
