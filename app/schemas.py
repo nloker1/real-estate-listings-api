@@ -88,6 +88,8 @@ class ListingBase(BaseModel):
     # Timestamps
     days_on_market: Optional[int] = None
     last_updated: Optional[datetime] = None
+    rmls_dom: Optional[int] = None
+    rmls_cdom: Optional[int] = None
 
     images: List[ListingImageBase] = []
 

@@ -17,6 +17,8 @@ class Listing(Base):
     detailed_status = Column(String, nullable=True) 
     status_date = Column(DateTime, nullable=True)
     days_on_market = Column(Integer, nullable=True)
+    rmls_dom = Column(Integer, nullable=True)
+    rmls_cdom = Column(Integer, nullable=True)
     is_published = Column(Boolean, default=True)
     
     # Sold Data (Optional for now since we are reverting filter)
