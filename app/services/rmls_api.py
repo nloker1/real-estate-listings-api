@@ -2,6 +2,8 @@ import sys
 import os
 import httpx
 import asyncio
+import smtplib
+from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -19,6 +21,30 @@ from sqlalchemy import select, delete
 from sqlalchemy.orm import configure_mappers
 
 configure_mappers()
+
+def send_alert_email(subject, body):
+    """Send an alert email via Gmail SMTP."""
+    email_user = os.getenv("EMAIL_USER")
+    email_pass = os.getenv("EMAIL_PASSWORD")
+    alert_to = os.getenv("ALERT_EMAIL", email_user)
+
+    if not email_user or not email_pass:
+        print("⚠️ Email credentials not configured — skipping email alert.")
+        return
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = email_user
+    msg["To"] = alert_to
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(email_user, email_pass)
+            server.sendmail(email_user, alert_to, msg.as_string())
+        print(f"📧 Alert email sent to {alert_to}")
+    except Exception as e:
+        print(f"❌ Failed to send alert email: {e}")
 
 def get_pst_now():
     """Returns current PST time as a naive datetime object."""
@@ -170,6 +196,50 @@ async def sync_rmls_listings():
                 except Exception as e:
                     print(f"❌ Exception: {e}")
                     return
+
+        # --- 3.5. DETECT DISAPPEARED LISTINGS ---
+        # Any listing we have as Active/Pending that RMLS no longer returns
+        # has likely gone off-market (pending, canceled, withdrawn, expired).
+        fetched_mls_ids = {str(item.get('ListingId')) for item in all_listings}
+
+        active_result = await db.execute(
+            select(Listing).filter(Listing.status.in_(['Active', 'Pending']))
+        )
+        active_db_listings = active_result.scalars().all()
+
+        # Safety guardrail: if >75% of listings disappeared, something is wrong
+        # (token expired, API error, etc.) — abort instead of nuking the DB
+        disappeared = [l for l in active_db_listings if l.mls_number not in fetched_mls_ids]
+        
+        if active_db_listings and len(disappeared) / len(active_db_listings) > 0.75:
+            pct = round(len(disappeared) / len(active_db_listings) * 100)
+            print(f"🚨 ABORT: {len(disappeared)}/{len(active_db_listings)} ({pct}%) active listings disappeared!")
+            print(f"   This likely means the API token expired or RMLS returned bad data.")
+            print(f"   No listings were modified. Please check your RMLS_TOKEN and re-run.")
+            send_alert_email(
+                subject="🚨 RMLS Sync ABORTED — Possible Token Expiry",
+                body=(
+                    f"RMLS sync detected {len(disappeared)} of {len(active_db_listings)} "
+                    f"active listings ({pct}%) disappeared in a single sync.\n\n"
+                    f"This likely means your RMLS token expired or the API returned bad data.\n\n"
+                    f"NO CHANGES WERE MADE to your database.\n\n"
+                    f"Action needed: Check your RMLS_TOKEN and re-run the sync.\n\n"
+                    f"Time: {get_pst_now().strftime('%Y-%m-%d %I:%M %p')} PST"
+                )
+            )
+            return
+
+        off_market_count = 0
+        for db_listing in disappeared:
+            db_listing.status = 'Off-Market'
+            db_listing.detailed_status = 'Disappeared from feed'
+            db_listing.status_date = get_pst_now()
+            db_listing.is_published = False
+            off_market_count += 1
+            print(f" [OFF-MARKET] MLS#: {db_listing.mls_number} - {db_listing.address}")
+
+        if off_market_count:
+            print(f"   ⚠️ {off_market_count} listings marked Off-Market (no longer in RMLS feed)")
 
         # --- 4. PROCESSING LOOP ---
         current_time_pst = get_pst_now()
