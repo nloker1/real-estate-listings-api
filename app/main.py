@@ -96,7 +96,9 @@ async def get_listings(
     max_price: Optional[int] = None,
     min_beds: Optional[int] = None,
     min_baths: Optional[float] = None,
-    min_sqft: Optional[int] = None
+    min_sqft: Optional[int] = None,
+    max_sqft: Optional[int] = None,
+    property_type: Optional[str] = None
 ):
     # Start building the query
     # We ADDED: status, beds, baths, sqft, zipcode so the map popup can show them
@@ -144,6 +146,10 @@ async def get_listings(
         query = query.where(Listing.baths >= min_baths)
     if min_sqft:
         query = query.where(Listing.sqft >= min_sqft)
+    if max_sqft:
+        query = query.where(Listing.sqft <= max_sqft)
+    if property_type:
+        query = query.where(Listing.property_type == property_type)
 
     # Limit results (Sold data can be huge, so 500 is a safe limit for now)
     query = query.limit(500)
