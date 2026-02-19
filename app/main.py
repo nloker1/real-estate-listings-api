@@ -85,6 +85,7 @@ async def get_listings(
     db: AsyncSession = Depends(get_db),
     # 1. SMART SEARCH (City OR Zip)
     search: Optional[str] = None,
+    cities: Optional[List[str]] = Query(None), # <--- NEW: Multiple cities
     
     # 2. STATUS FILTER (Dynamic!)
     # Defaults to ["Active"] if the user sends nothing.
@@ -125,9 +126,16 @@ async def get_listings(
     if status:
         query = query.where(Listing.status.in_(status))
 
-    # 2. Smart Search (Zip OR City)
-    if search:
-        search_term = f"%{search}%"
+    # 2. Multi-City Logic (Takes priority over search if both provided)
+    if cities:
+        # Standardize search by removing spaces to match DB (e.g., "Hood River" -> "HoodRiver")
+        normalized_cities = [c.replace(" ", "") for c in cities]
+        city_filters = [Listing.city.ilike(f"%{c}%") for c in normalized_cities]
+        query = query.where(or_(*city_filters))
+    elif search:
+        # Also normalize the single search term
+        normalized_search = search.replace(" ", "")
+        search_term = f"%{normalized_search}%"
         query = query.where(
             or_(
                 Listing.city.ilike(search_term),
