@@ -199,7 +199,9 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
     ).where(
         Listing.zipcode == target_zip, 
         Listing.status == 'Active',
-        Listing.property_type != 'Land'
+        Listing.days_on_market < 730,
+        Listing.property_type != 'Land',
+        Listing.property_type != 'CommercialSale'
     )
 
     stats_result = await db.execute(stats_stmt)
