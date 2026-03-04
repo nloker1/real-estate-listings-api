@@ -1,27 +1,32 @@
 #!/bin/bash
 
-# Define where you want the logs to live
-LOG_FILE="/root/real-estate-listings-api/sync.log"
+# 1. DEFINE PATHS
+# Use the absolute path to your project
+PROJECT_DIR="/root/real-estate-listings-api"
 
-# Navigate to the project directory
-cd /root/real-estate-listings-api
+# Use the python executable INSIDE your venv
+VENV_PYTHON="$PROJECT_DIR/venv/bin/python"
 
-# Print a divider line with the current date into the log file
+# Define the log file
+LOG_FILE="$PROJECT_DIR/sync.log"
+
+# 2. START LOGGING
 echo "--------------------------------------------------" >> "$LOG_FILE"
 echo "Starting Sync: $(date)" >> "$LOG_FILE"
 
-# Run the python script
-# '>>' appends standard output to the file
-# '2>&1' captures errors and puts them in the same file
-python3 -m app.services.rmls_api >> "$LOG_FILE" 2>&1
+# 3. RUN THE RMLS SYNC
+# We navigate to the folder first to ensure imports work
+cd "$PROJECT_DIR"
 
-# Print end time
-echo "Finished Sync: $(date)" >> "$LOG_FILE"#!/bin/bash
-# Navigate to the project directory
-cd ~/real-estate-listings-api
+echo "Running RMLS Data Sync..." >> "$LOG_FILE"
+# We run python using the VENV path
+"$VENV_PYTHON" -m app.services.rmls_api >> "$LOG_FILE" 2>&1
 
-# Activate your virtual environment
-source venv/bin/activate
+# 4. RUN THE ALERT WORKER
+# This checks for matches against new properties pulled in the step above
+echo "Checking for Saved Search Matches..." >> "$LOG_FILE"
+export PYTHONPATH=$PROJECT_DIR
+"$VENV_PYTHON" app/services/alert_worker.py >> "$LOG_FILE" 2>&1
 
-# Run the script
-python3 -m app.services.rmls_api
+# 5. FINISH
+echo "Finished Everything: $(date)" >> "$LOG_FILE"

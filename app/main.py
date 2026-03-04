@@ -322,10 +322,57 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
     }
 
 
-@app.post("/api/saved-searches", response_model=schemas.SavedSearchCreate)
-async def create_saved_search(search: schemas.SavedSearchCreate, db: AsyncSession = Depends(get_db)):
-    db_search = models.SavedSearch(**search.dict())
-    db.add(db_search)
-    await db.commit()
-    await db.refresh(db_search)
-    return db_search
+@app.post("/api/saved-searches")
+async def create_saved_search(request: schemas.AlertRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Creates a new saved search and links it to a Lead (user).
+    
+    Work performed:
+    1.  Lead Lookup: Checks if a user with this email already exists.
+    2.  Lead Creation: If new, creates a Lead record first.
+    3.  Criteria Storage: Takes the current filter state from the frontend and 
+        saves it as a JSON blob in SavedSearch.
+    """
+    
+    # 1. Handle the Lead (User)
+    # Check if the email already exists in our database
+    lead_query = select(models.Lead).where(models.Lead.email == request.email)
+    lead_result = await db.execute(lead_query)
+    db_lead = lead_result.scalars().first()
+    
+    # If the user is new, create their Lead record now
+    if not db_lead:
+        db_lead = models.Lead(
+            email=request.email,
+            phone=request.phone,
+            # For now we use the email as the name if none provided
+            name=request.email.split('@')[0] 
+        )
+        db.add(db_lead)
+        # We flush so the db_lead gets an ID, which we need for the SavedSearch foreign key
+        await db.flush() 
+
+    # 2. Create the Saved Search
+    # We store the criteria exactly as sent from the FilterBar.js buildFilters()
+    new_search = models.SavedSearch(
+        lead_id=db_lead.id,
+        criteria=request.criteria,
+        frequency="instant", # Default to instant alerts
+        is_active=True
+    )
+    
+    db.add(new_search)
+    
+    try:
+        await db.commit()
+        await db.refresh(new_search)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    return {
+        "status": "success",
+        "message": "Search saved successfully!",
+        "search_id": new_search.id,
+        "email": db_lead.email
+    }
