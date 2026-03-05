@@ -4,7 +4,7 @@ import resend
 from datetime import datetime, timezone
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import SessionLocal
+from app.database import AsyncSessionLocal
 from app.models import SavedSearch, Listing, EmailLog, Lead
 
 # 1. Setup Resend
@@ -17,7 +17,7 @@ async def process_alerts():
     2. Checks for NEW listings that match the search criteria.
     3. Sends an email for each match.
     """
-    async with SessionLocal() as db:
+    async with AsyncSessionLocal() as db:
         # Get all active searches and their associated Lead (user)
         stmt = select(SavedSearch).where(SavedSearch.is_active == True)
         result = await db.execute(stmt)
