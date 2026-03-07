@@ -68,16 +68,16 @@ async def get_listing(mls_number: str, db: AsyncSession = Depends(get_db)):
         select(Listing)
         .options(selectinload(Listing.images))
         .filter(Listing.mls_number == mls_number)
-        # We allow viewing of Inactive listings if user has the direct link, 
+        # We allow viewing of Inactive listings if user has the direct link,
         # or you can add .where(Listing.internal_status == 'Active') to restrict it.
     )
     listing = result.scalars().first()
-    
+
     if not listing:
         # Using HTTPException is better practice for APIs
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    return listing 
+    return listing
 
 # UPDATE 3: Full Compliance & Performance Filter
 @app.get("/api/listings")
@@ -92,6 +92,8 @@ async def get_listings(
     # The user can send ?status=Active&status=Pending&status=Sold
     status: List[str] = Query(["Active"]), 
     
+    agent_name: Optional[str] = None, # <--- NEW: Filter by Agent Name
+
     # 3. NUMERIC FILTERS
     min_price: Optional[int] = None,
     max_price: Optional[int] = None,
@@ -104,12 +106,12 @@ async def get_listings(
     # Start building the query
     # We ADDED: status, beds, baths, sqft, zipcode so the map popup can show them
     query = select(
-        Listing.mls_number, 
-        Listing.price, 
+        Listing.mls_number,
+        Listing.price,
         Listing.status,         # <--- Added
-        Listing.lat, 
-        Listing.lon, 
-        Listing.address, 
+        Listing.lat,
+        Listing.lon,
+        Listing.address,
         Listing.city,
         Listing.zipcode,        # <--- Added
         Listing.beds,           # <--- Added
@@ -117,10 +119,20 @@ async def get_listings(
         Listing.sqft,           # <--- Added
         Listing.photo_url,
         Listing.listing_brokerage,
+        Listing.list_agent_name,
+        Listing.buyer_agent_name,
         Listing.is_address_exposed
     ).where(Listing.is_published == True) # Ensure we don't show internal/hidden data
 
     # --- APPLY FILTERS ---
+
+    if agent_name:
+        query = query.where(
+            or_(
+                Listing.list_agent_name == agent_name,
+                Listing.buyer_agent_name == agent_name
+            )
+        )
 
     # 1. Status Logic
     if status:
@@ -142,7 +154,7 @@ async def get_listings(
                 Listing.zipcode.ilike(search_term)
             )
         )
-    
+
     # 3. Numeric Filters
     if min_price:
         query = query.where(Listing.price >= min_price)
@@ -164,10 +176,10 @@ async def get_listings(
 
     result = await db.execute(query)
     rows = result.all()
-    
+
     # FIX: Convert the SQLAlchemy "Rows" into standard Python Dictionaries
     return [dict(row._mapping) for row in rows]
-    
+
     # UPDATE 4: Compliance Logic for "Undisclosed Address"
     # This prevents sensitive data from ever leaving your server
     output = []
@@ -181,12 +193,12 @@ async def get_listings(
 
 @app.get("/api/market/{city_slug}")
 async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)):
-    
+
     # 1. VALIDATE CITY
     target_zip = ZIP_MAP.get(city_slug)
     if not target_zip:
         raise HTTPException(status_code=404, detail="Market not found for this city.")
-    
+
     one_year_ago = datetime.now() - timedelta(days=365)
 
     # =========================================================
@@ -197,7 +209,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         func.percentile_cont(0.5).within_group(Listing.days_on_market).label("median_dom"),
         func.count(Listing.id).label("active_count")
     ).where(
-        Listing.zipcode == target_zip, 
+        Listing.zipcode == target_zip,
         Listing.status == 'Active',
         Listing.days_on_market < 730,
         Listing.property_type != 'Land',
@@ -211,7 +223,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
     # QUERY 2: Top 5 Realtors
     # =========================================================
     q_list = select(
-        Listing.list_agent_name.label("agent_name"), 
+        Listing.list_agent_name.label("agent_name"),
         Listing.id.label("listing_id"),
         Listing.price
     ).where(
@@ -222,7 +234,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
     )
 
     q_buyer = select(
-        Listing.buyer_agent_name.label("agent_name"), 
+        Listing.buyer_agent_name.label("agent_name"),
         Listing.id.label("listing_id"),
         Listing.price
     ).where(
@@ -250,33 +262,33 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
     # =========================================================
     # QUERY 3: 12-Month Trend (RAW SQL VERSION)
     # =========================================================
-    # Note: We import text inside the function just to be safe, 
+    # Note: We import text inside the function just to be safe,
     # but normally it goes at the top of the file
-    
-    # TODO (Refactor): Convert this to pure SQLAlchemy CTE syntax once the 
+
+    # TODO (Refactor): Convert this to pure SQLAlchemy CTE syntax once the
     # date_trunc grouping issue is resolved. For now, raw SQL is stable.
     raw_sql = text("""
-        SELECT 
-            DATE_TRUNC('month', close_date) AS month_date, 
+        SELECT
+            DATE_TRUNC('month', close_date) AS month_date,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price) AS median_price,
             COUNT(*) AS sales_count
         FROM listings
-        WHERE 
-            zipcode = :zipcode 
-            AND status = 'Sold' 
+        WHERE
+            zipcode = :zipcode
+            AND status = 'Sold'
             AND close_date >= :one_year_ago
             AND property_type != 'Land'
-        GROUP BY 
+        GROUP BY
             DATE_TRUNC('month', close_date)
-        ORDER BY 
+        ORDER BY
             month_date;
     """)
 
     trend_result = await db.execute(raw_sql, {
-        "zipcode": target_zip, 
+        "zipcode": target_zip,
         "one_year_ago": one_year_ago
     })
-    
+
     trends = trend_result.all()
 
     # =========================================================
@@ -304,7 +316,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
             month_str = t.month_date.strftime("%b")
         else:
             month_str = "Unk"
-            
+
         formatted_trends.append({
             "month": month_str,
             "price": int(t.median_price) if t.median_price else 0,
@@ -326,31 +338,31 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
 async def create_saved_search(request: schemas.AlertRequest, db: AsyncSession = Depends(get_db)):
     """
     Creates a new saved search and links it to a Lead (user).
-    
+
     Work performed:
     1.  Lead Lookup: Checks if a user with this email already exists.
     2.  Lead Creation: If new, creates a Lead record first.
-    3.  Criteria Storage: Takes the current filter state from the frontend and 
+    3.  Criteria Storage: Takes the current filter state from the frontend and
         saves it as a JSON blob in SavedSearch.
     """
-    
+
     # 1. Handle the Lead (User)
     # Check if the email already exists in our database
     lead_query = select(models.Lead).where(models.Lead.email == request.email)
     lead_result = await db.execute(lead_query)
     db_lead = lead_result.scalars().first()
-    
+
     # If the user is new, create their Lead record now
     if not db_lead:
         db_lead = models.Lead(
             email=request.email,
             phone=request.phone,
             # For now we use the email as the name if none provided
-            name=request.email.split('@')[0] 
+            name=request.email.split('@')[0]
         )
         db.add(db_lead)
         # We flush so the db_lead gets an ID, which we need for the SavedSearch foreign key
-        await db.flush() 
+        await db.flush()
 
     # 2. Create the Saved Search
     # We store the criteria exactly as sent from the FilterBar.js buildFilters()
@@ -360,9 +372,9 @@ async def create_saved_search(request: schemas.AlertRequest, db: AsyncSession = 
         frequency="instant", # Default to instant alerts
         is_active=True
     )
-    
+
     db.add(new_search)
-    
+
     try:
         await db.commit()
         await db.refresh(new_search)
