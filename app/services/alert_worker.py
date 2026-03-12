@@ -1,6 +1,7 @@
 import os
 import asyncio
 import resend
+import re
 from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -8,6 +9,17 @@ from app.database import AsyncSessionLocal
 from app.models import SavedSearch, Listing, EmailLog, Lead
 
 resend.api_key = os.getenv("RESEND_API_KEY")
+
+def create_slug(address):
+    """Simple Python version of the frontend slugify logic."""
+    if not address:
+        return "property"
+    # Match frontend: lowercase, spaces to hyphens, remove non-alphanumeric
+    slug = address.lower().strip()
+    slug = re.sub(r'\s+', '-', slug)
+    slug = re.sub(r'[^\w\-]+', '', slug)
+    slug = re.sub(r'\-\-+', '-', slug)
+    return slug
 
 async def process_alerts():
     print("Checking for Saved Search Matches...")
@@ -99,6 +111,9 @@ async def process_alerts():
                 beds_str = f"{listing.beds}" if listing.beds is not None else "—"
                 baths_str = f"{listing.baths}" if listing.baths is not None else "—"
                 sqft_str = f"{listing.sqft:,}" if listing.sqft is not None else "—"
+                
+                slug = create_slug(listing.address)
+                property_url = f"https://gorgerealty.com/property/{slug}/{listing.mls_number}"
 
                 subject = f"New Match: {listing.address} - ${listing.price:,}"
                 html_content = f"""
@@ -108,7 +123,7 @@ async def process_alerts():
                     <h3 style="margin-top: 15px;">{listing.address}</h3>
                     <p style="font-size: 18px; font-weight: bold;">${listing.price:,}</p>
                     <p>{beds_str} Beds | {baths_str} Baths | {sqft_str} SqFt</p>
-                    <a href="https://gorgerealty.com/property/{listing.mls_number}" 
+                    <a href="{property_url}" 
                        style="display: inline-block; background: #1a5091; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-top: 10px;">
                        View Full Listing Details
                     </a>
