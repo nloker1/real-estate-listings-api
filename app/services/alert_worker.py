@@ -58,14 +58,24 @@ async def process_alerts():
             if criteria.get('propertyType'):
                 query = query.where(Listing.property_type == criteria['propertyType'])
             
+            match_result = await db.execute(query)
+            pre_city_listings = match_result.scalars().all()
+            print(f"    - Listings matching basic criteria: {len(pre_city_listings)}")
+
             if criteria.get('cities'):
-                normalized_cities = [c.replace(" ", "") for c in criteria['cities']]
+                # Handle both "Hood River" and "HoodRiver" matches
                 from sqlalchemy import or_
-                city_filters = [Listing.city.ilike(f"%{c}%") for c in normalized_cities]
+                city_filters = []
+                for c in criteria['cities']:
+                    city_filters.append(Listing.city.ilike(f"%{c}%"))
+                    if " " in c:
+                        city_filters.append(Listing.city.ilike(f"%{c.replace(' ', '')}%"))
+                
                 query = query.where(or_(*city_filters))
 
             match_result = await db.execute(query)
             new_listings = match_result.scalars().all()
+            print(f"    - Listings matching city criteria: {len(new_listings)}")
 
             if not new_listings:
                 continue
