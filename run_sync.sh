@@ -22,11 +22,5 @@ echo "Running RMLS Data Sync..." >> "$LOG_FILE"
 # We run python using the VENV path
 "$VENV_PYTHON" -m app.services.rmls_api >> "$LOG_FILE" 2>&1
 
-# 4. RUN THE ALERT WORKER
-# This checks for matches against new properties pulled in the step above
-echo "Checking for Saved Search Matches..." >> "$LOG_FILE"
-export PYTHONPATH=$PROJECT_DIR
-"$VENV_PYTHON" app/services/alert_worker.py >> "$LOG_FILE" 2>&1
-
 # 5. FINISH
 echo "Finished Everything: $(date)" >> "$LOG_FILE"

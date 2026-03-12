@@ -10,6 +10,7 @@ from app.models import SavedSearch, Listing, EmailLog, Lead
 resend.api_key = os.getenv("RESEND_API_KEY")
 
 async def process_alerts():
+    print("Checking for Saved Search Matches...")
     async with AsyncSessionLocal() as db:
         
         # FIX 3: The JOIN. We get the Search AND the Lead in one single query.
@@ -20,12 +21,15 @@ async def process_alerts():
         )
         result = await db.execute(stmt)
         searches = result.scalars().all()
+        
+        print(f"Found {len(searches)} active searches.")
 
         for search in searches:
             # We already have the lead from the JOIN! No extra query needed.
             lead = search.lead 
             
             if not lead or not lead.email:
+                print(f"Skipping search {search.id}: No lead email.")
                 continue
 
             # Ensure we are using a naive datetime for comparison (matching the DB column)
@@ -36,6 +40,8 @@ async def process_alerts():
             criteria = search.criteria
             query = select(Listing).where(Listing.is_published == True)
             query = query.where(Listing.created_at > since_time)
+            
+            # ... (rest of query building)
 
             if criteria.get('minPrice'):
                 query = query.where(Listing.price >= int(criteria['minPrice']))
