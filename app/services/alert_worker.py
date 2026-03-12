@@ -123,22 +123,33 @@ async def process_alerts():
                         "html": html_content,
                     }
                     email_response = resend.Emails.send(params)
+                    
+                    # Check if the response actually contains an ID (success)
+                    if email_response and email_response.get("id"):
+                        new_log = EmailLog(
+                            search_id=search.id,
+                            listing_id=listing.mls_number,
+                            user_email=lead.email,
+                            message_id=email_response.get("id")
+                        )
+                        db.add(new_log)
+                        
+                        # Update last alert time (using naive UTC to match DB schema)
+                        search.last_alert_sent = datetime.utcnow()
+                        print(f"Sent alert for {listing.mls_number} to {lead.email}")
+                    else:
+                        print(f"Resend accepted request but returned no ID for {listing.mls_number}")
 
-                    new_log = EmailLog(
-                        search_id=search.id,
-                        listing_id=listing.mls_number,
-                        user_email=lead.email,
-                        message_id=email_response.get("id")
-                    )
-                    db.add(new_log)
-                    
-                    # Update last alert time (using naive UTC to match DB schema)
-                    search.last_alert_sent = datetime.utcnow()
-                    
-                    print(f"Sent alert for {listing.mls_number} to {lead.email}")
+                    # RATE LIMIT: Resend allows 2 req/sec. 0.6s delay keeps us safe.
+                    await asyncio.sleep(0.6)
 
                 except Exception as e:
+                    error_msg = str(e).lower()
                     print(f"Resend error: {str(e)}")
+                    # If it's a domain/auth error, don't update timestamp so we can retry later
+                    if "domain" in error_msg or "verify" in error_msg or "unauthorized" in error_msg:
+                        print("Domain/Auth error detected. Skipping timestamp update for retry.")
+                        continue
 
         # Commit all the new email logs and updated search timestamps at once
         await db.commit()

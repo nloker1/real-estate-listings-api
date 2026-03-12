@@ -82,8 +82,8 @@ class Listing(Base):
 
     # --- SYSTEM ---
     is_new = Column(Boolean, default=False)
-    created_at = Column(DateTime, nullable=True)
-    last_updated = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    last_updated = Column(DateTime, onupdate=func.now())
 
     images = relationship("ListingImage", back_populates="listing", cascade="all, delete-orphan")
 
