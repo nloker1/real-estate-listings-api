@@ -60,16 +60,22 @@ async def process_alerts():
             
             match_result = await db.execute(query)
             pre_city_listings = match_result.scalars().all()
-            print(f"    - Listings matching basic criteria: {len(pre_city_listings)}")
+            print(f"    - Listings matching price/status: {len(pre_city_listings)}")
+            if pre_city_listings:
+                for l in pre_city_listings:
+                    print(f"      * Found: {l.address} in City: '{l.city}'")
 
             if criteria.get('cities'):
-                # Handle both "Hood River" and "HoodRiver" matches
-                from sqlalchemy import or_
+                from sqlalchemy import or_, func
                 city_filters = []
                 for c in criteria['cities']:
+                    # 1. Match as-is (e.g. "Hood River")
                     city_filters.append(Listing.city.ilike(f"%{c}%"))
-                    if " " in c:
-                        city_filters.append(Listing.city.ilike(f"%{c.replace(' ', '')}%"))
+                    # 2. Match without spaces (e.g. "HoodRiver")
+                    no_spaces = c.replace(' ', '')
+                    city_filters.append(Listing.city.ilike(f"%{no_spaces}%"))
+                    # 3. Handle DB-side no-space comparison (removes spaces from DB column before check)
+                    city_filters.append(func.replace(Listing.city, ' ', '').ilike(f"%{no_spaces}%"))
                 
                 query = query.where(or_(*city_filters))
 
