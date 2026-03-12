@@ -28,10 +28,10 @@ async def process_alerts():
             if not lead or not lead.email:
                 continue
 
-            # Ensure we are using a timezone-aware datetime for comparison
+            # Ensure we are using a naive datetime for comparison (matching the DB column)
             since_time = search.last_alert_sent or search.created_at
-            if since_time.tzinfo is None:
-                since_time = since_time.replace(tzinfo=timezone.utc)
+            if since_time and since_time.tzinfo is not None:
+                since_time = since_time.replace(tzinfo=None)
 
             criteria = search.criteria
             query = select(Listing).where(Listing.is_published == True)
@@ -102,8 +102,8 @@ async def process_alerts():
                     )
                     db.add(new_log)
                     
-                    # FIX 2: Use timezone-aware datetime
-                    search.last_alert_sent = datetime.now(timezone.utc)
+                    # Update last alert time (using naive UTC to match DB schema)
+                    search.last_alert_sent = datetime.utcnow()
                     
                     print(f"Sent alert for {listing.mls_number} to {lead.email}")
 
