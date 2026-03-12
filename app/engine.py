@@ -51,7 +51,7 @@ def send_alert_email(email, listing):
     Helper to format the HTML and send via Resend.
     """
     return resend.Emails.send({
-        "from": "Gorge Property Search <alerts@lokerrealty.com>",
+        "from": "Gorge Property Search <alerts@gorgerealty.com>",
         "to": email,
         "subject": f"New Match in {listing.city}: ${listing.price:,}",
         "html": f"""
