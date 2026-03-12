@@ -38,6 +38,10 @@ async def process_alerts():
                 since_time = since_time.replace(tzinfo=None)
 
             criteria = search.criteria
+            print(f"  - Checking Search {search.id} (Lead: {lead.email})")
+            print(f"    Criteria: {criteria}")
+            print(f"    Since: {since_time}")
+
             query = select(Listing).where(Listing.is_published == True)
             query = query.where(Listing.created_at > since_time)
             
