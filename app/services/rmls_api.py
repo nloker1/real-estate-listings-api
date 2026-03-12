@@ -280,6 +280,7 @@ async def sync_rmls_listings():
                 "close_date": close_date,
                 "days_on_market": item.get('DaysOnMarket'),
                 "is_published": should_publish,
+                "created_at": current_time_pst,
                 "last_updated": current_time_pst,
                 
                 # ADDRESS

@@ -96,6 +96,10 @@ async def process_alerts():
                 if listing.mls_number in emailed_listing_ids:
                     continue
 
+                beds_str = f"{listing.beds}" if listing.beds is not None else "—"
+                baths_str = f"{listing.baths}" if listing.baths is not None else "—"
+                sqft_str = f"{listing.sqft:,}" if listing.sqft is not None else "—"
+
                 subject = f"New Match: {listing.address} - ${listing.price:,}"
                 html_content = f"""
                 <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
@@ -103,7 +107,7 @@ async def process_alerts():
                     <img src="{listing.photo_url}" style="width: 100%; border-radius: 8px;" />
                     <h3 style="margin-top: 15px;">{listing.address}</h3>
                     <p style="font-size: 18px; font-weight: bold;">${listing.price:,}</p>
-                    <p>{listing.beds} Beds | {listing.baths} Baths | {listing.sqft:,} SqFt</p>
+                    <p>{beds_str} Beds | {baths_str} Baths | {sqft_str} SqFt</p>
                     <a href="https://gorgerealty.com/property/{listing.mls_number}" 
                        style="display: inline-block; background: #1a5091; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-top: 10px;">
                        View Full Listing Details
