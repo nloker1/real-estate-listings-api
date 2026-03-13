@@ -335,6 +335,7 @@ async def sync_rmls_listings():
                 "high_school": item.get('HighSchool'),
                 "mls_area_major": item.get('MLSAreaMajor'),
                 "zoning": item.get('Zoning'),
+                "photo_url": item.get('Photo1URL'), # Explicitly populate primary photo
             }
 
             if existing_listing:
@@ -352,11 +353,22 @@ async def sync_rmls_listings():
 
             # Media Sync
             media_data = item.get('Media', [])
+            first_photo_url = item.get('Photo1URL')
+
             if media_data:
                 await db.execute(delete(ListingImage).where(ListingImage.listing_id == target_listing.id))
                 for idx, m in enumerate(media_data):
-                    if m.get('MediaURL'):
-                        db.add(ListingImage(listing_id=target_listing.id, url=m.get('MediaURL'), order=idx, is_private=m.get('PrivateYn')))
+                    url = m.get('MediaURL')
+                    if url:
+                        # FALLBACK: If Photo1URL was empty, grab the first URL from Media array
+                        if not first_photo_url:
+                            first_photo_url = url
+                        
+                        db.add(ListingImage(listing_id=target_listing.id, url=url, order=idx, is_private=m.get('PrivateYn')))
+            
+            # Update the listing's primary photo_url if we found a fallback
+            if first_photo_url:
+                target_listing.photo_url = first_photo_url
 
         # --- 5. COMMIT ---
         await db.commit()
