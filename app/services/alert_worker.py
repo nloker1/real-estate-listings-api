@@ -55,6 +55,7 @@ async def process_alerts():
             print(f"    Since: {since_time}")
 
             query = select(Listing).where(Listing.is_published == True)
+            query = query.where(Listing.status == 'Active') # Ensure only Active listings trigger alerts
             query = query.where(Listing.created_at > since_time)
             
             # ... (rest of query building)
