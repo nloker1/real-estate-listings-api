@@ -280,7 +280,6 @@ async def sync_rmls_listings():
                 "close_date": close_date,
                 "days_on_market": item.get('DaysOnMarket'),
                 "is_published": should_publish,
-                "created_at": current_time_pst,
                 "last_updated": current_time_pst,
                 
                 # ADDRESS
@@ -344,7 +343,12 @@ async def sync_rmls_listings():
                 updated_count += 1
                 target_listing = existing_listing
             else:
-                new_listing = Listing(mls_number=mls_id, is_new=True, **listing_data)
+                new_listing = Listing(
+                    mls_number=mls_id, 
+                    is_new=True, 
+                    created_at=current_time_pst, # Set created_at ONLY for new listings
+                    **listing_data
+                )
                 db.add(new_listing)
                 await db.flush()
                 target_listing = new_listing
