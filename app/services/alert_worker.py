@@ -144,7 +144,7 @@ async def process_alerts():
                     if email_response and email_response.get("id"):
                         new_log = EmailLog(
                             search_id=search.id,
-                            listing_id=listing.mls_number,
+                            listing_id=str(listing.mls_number), # Explicitly ensure string for MLS
                             user_email=lead.email,
                             message_id=email_response.get("id")
                         )
@@ -152,14 +152,18 @@ async def process_alerts():
                         
                         # Update last alert time (using naive UTC to match DB schema)
                         search.last_alert_sent = datetime.utcnow()
-                        print(f"Sent alert for {listing.mls_number} to {lead.email}")
+                        
+                        # Commit immediately after each success to ensure logs are saved
+                        await db.commit()
+                        print(f"Sent alert for {listing.mls_number} to {lead.email} (Logged)")
                     else:
                         print(f"Resend accepted request but returned no ID for {listing.mls_number}")
 
                     # RATE LIMIT: Resend allows 2 req/sec. 0.6s delay keeps us safe.
-                    await asyncio.sleep(0.6)
+                    await asyncio.sleep(0.9)
 
                 except Exception as e:
+                    await db.rollback() # Rollback on error to clear the failed session state
                     error_msg = str(e).lower()
                     print(f"Resend error: {str(e)}")
                     # If it's a domain/auth error, don't update timestamp so we can retry later
@@ -167,8 +171,7 @@ async def process_alerts():
                         print("Domain/Auth error detected. Skipping timestamp update for retry.")
                         continue
 
-        # Commit all the new email logs and updated search timestamps at once
-        await db.commit()
+        # No longer need the single commit at the end as we commit per-success now
 
 if __name__ == "__main__":
     asyncio.run(process_alerts())
