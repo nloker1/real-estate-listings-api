@@ -101,6 +101,8 @@ async def get_listings(
     min_baths: Optional[float] = None,
     min_sqft: Optional[int] = None,
     max_sqft: Optional[int] = None,
+    min_acres: Optional[float] = None,
+    max_acres: Optional[float] = None,
     property_type: Optional[str] = None
 ):
     # Start building the query
@@ -117,6 +119,7 @@ async def get_listings(
         Listing.beds,           # <--- Added
         Listing.baths,          # <--- Added
         Listing.sqft,           # <--- Added
+        Listing.acreage,        # <--- Added for Acres Filter
         Listing.photo_url,
         Listing.listing_brokerage,
         Listing.list_agent_name,
@@ -168,8 +171,24 @@ async def get_listings(
         query = query.where(Listing.sqft >= min_sqft)
     if max_sqft:
         query = query.where(Listing.sqft <= max_sqft)
+    if min_acres:
+        query = query.where(Listing.acreage >= min_acres)
+    if max_acres:
+        query = query.where(Listing.acreage <= max_acres)
     if property_type:
-        query = query.where(Listing.property_type == property_type)
+        if property_type == "Commercial":
+            query = query.where(Listing.property_type == "CommercialSale")
+        elif property_type == "Multi-Family":
+            query = query.where(Listing.property_type == "MultiFamily")
+        elif property_type == "Manufactured":
+            query = query.where(
+                or_(
+                    Listing.property_sub_type == "ManufacturedHomeonRealProperty",
+                    Listing.property_sub_type == "ManufacturedHomeinPark"
+                )
+            )
+        else:
+            query = query.where(Listing.property_type == property_type)
 
     # Limit results (Sold data can be huge, so 500 is a safe limit for now)
     query = query.limit(500)
@@ -323,6 +342,55 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
             "count": t.sales_count
         })
 
+    # =========================================================
+    # QUERY 4: Recently Listed (Last 30 Days)
+    # =========================================================
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    # Nate's specific exclusion date for the "Logic Bug" sync
+    exclusion_timestamp = datetime(2026, 3, 12, 16, 13, 21, 102723)
+    
+    recent_listings_stmt = select(
+        Listing.mls_number,
+        Listing.address,
+        Listing.price,
+        Listing.status,
+        Listing.beds,
+        Listing.baths,
+        Listing.sqft,
+        Listing.photo_url,
+        Listing.days_on_market,
+        Listing.created_at
+    ).where(
+        Listing.zipcode == target_zip,
+        Listing.created_at >= thirty_days_ago,
+        Listing.created_at != exclusion_timestamp, # Exclude the batch from the logic bug
+        Listing.is_published == True,
+        Listing.property_type != 'Land'
+    ).order_by(desc(Listing.created_at)).limit(15)
+
+    recent_result = await db.execute(recent_listings_stmt)
+    recent_listings = recent_result.all()
+
+    formatted_recent = []
+    for r in recent_listings:
+        # Create a slug for the address: "123 Main St" -> "123-main-st"
+        address_slug = "undisclosed"
+        if r.address:
+            address_slug = r.address.lower().replace(" ", "-").replace(",", "").replace(".", "")
+            
+        formatted_recent.append({
+            "mls_number": r.mls_number,
+            "address": r.address,
+            "address_slug": address_slug,
+            "price": r.price,
+            "status": r.status,
+            "beds": r.beds,
+            "baths": r.baths,
+            "sqft": r.sqft,
+            "photo_url": r.photo_url,
+            "dom": r.days_on_market
+        })
+
     return {
         "marketData": {
             "medianPrice": median_price,
@@ -330,7 +398,8 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
             "activeListings": active_count
         },
         "topRealtors": formatted_realtors,
-        "trendData": formatted_trends
+        "trendData": formatted_trends,
+        "recentListings": formatted_recent
     }
 
 
