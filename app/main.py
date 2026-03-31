@@ -391,6 +391,97 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
             "dom": r.days_on_market
         })
 
+    # =========================================================
+    # QUERY 5: Recently Sold (Last 30 Days)
+    # =========================================================
+    recently_sold_stmt = select(
+        Listing.mls_number,
+        Listing.address,
+        Listing.price,
+        Listing.status,
+        Listing.beds,
+        Listing.baths,
+        Listing.sqft,
+        Listing.photo_url,
+        Listing.days_on_market,
+        Listing.close_date
+    ).where(
+        Listing.zipcode == target_zip,
+        Listing.status == 'Sold',
+        Listing.close_date >= thirty_days_ago,
+        Listing.is_published == True,
+        Listing.property_type != 'Land'
+    ).order_by(desc(Listing.close_date)).limit(15)
+
+    sold_result = await db.execute(recently_sold_stmt)
+    recently_sold = sold_result.all()
+
+    formatted_sold = []
+    for s in recently_sold:
+        address_slug = "undisclosed"
+        if s.address:
+            address_slug = s.address.lower().replace(" ", "-").replace(",", "").replace(".", "")
+            
+        formatted_sold.append({
+            "mls_number": s.mls_number,
+            "address": s.address,
+            "address_slug": address_slug,
+            "price": s.price,
+            "status": s.status,
+            "beds": s.beds,
+            "baths": s.baths,
+            "sqft": s.sqft,
+            "photo_url": s.photo_url,
+            "dom": s.days_on_market,
+            "close_date": s.close_date.strftime("%Y-%m-%d") if s.close_date else None
+        })
+
+    # =========================================================
+    # QUERY 6: Recently Pending (Last 30 Days)
+    # =========================================================
+    # For pending, we look at listings that have a 'Pending' status 
+    # and were moved to pending recently (using last_updated).
+    recently_pending_stmt = select(
+        Listing.mls_number,
+        Listing.address,
+        Listing.price,
+        Listing.status,
+        Listing.beds,
+        Listing.baths,
+        Listing.sqft,
+        Listing.photo_url,
+        Listing.days_on_market,
+        Listing.last_updated
+    ).where(
+        Listing.zipcode == target_zip,
+        Listing.status == 'Pending',
+        Listing.last_updated >= thirty_days_ago,
+        Listing.is_published == True,
+        Listing.property_type != 'Land'
+    ).order_by(desc(Listing.last_updated)).limit(15)
+
+    pending_result = await db.execute(recently_pending_stmt)
+    recently_pending = pending_result.all()
+
+    formatted_pending = []
+    for p in recently_pending:
+        address_slug = "undisclosed"
+        if p.address:
+            address_slug = p.address.lower().replace(" ", "-").replace(",", "").replace(".", "")
+            
+        formatted_pending.append({
+            "mls_number": p.mls_number,
+            "address": p.address,
+            "address_slug": address_slug,
+            "price": p.price,
+            "status": p.status,
+            "beds": p.beds,
+            "baths": p.baths,
+            "sqft": p.sqft,
+            "photo_url": p.photo_url,
+            "dom": p.days_on_market
+        })
+
     return {
         "marketData": {
             "medianPrice": median_price,
@@ -399,7 +490,9 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         },
         "topRealtors": formatted_realtors,
         "trendData": formatted_trends,
-        "recentListings": formatted_recent
+        "recentListings": formatted_recent,
+        "recentlySold": formatted_sold,
+        "recentlyPending": formatted_pending
     }
 
 
