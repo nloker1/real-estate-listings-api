@@ -28,8 +28,10 @@ async def process_alerts():
         # FIX 3: The JOIN. We get the Search AND the Lead in one single query.
         stmt = (
             select(SavedSearch)
-            .options(joinedload(SavedSearch.lead)) # Assumes you have a relationship set up
+            .join(Lead)
+            .options(joinedload(SavedSearch.lead))
             .where(SavedSearch.is_active == True)
+            .where(Lead.is_unsubscribed == False)
         )
         result = await db.execute(stmt)
         searches = result.scalars().all()
@@ -115,6 +117,7 @@ async def process_alerts():
                 
                 slug = create_slug(listing.address)
                 property_url = f"https://gorgerealty.com/property/{slug}/{listing.mls_number}"
+                unsubscribe_url = f"https://gorgerealty.com/unsubscribe?token={lead.unsubscribe_token}" if lead.unsubscribe_token else "https://gorgerealty.com/contact"
 
                 subject = f"New Match: {listing.address} - ${listing.price:,}"
                 html_content = f"""
@@ -128,6 +131,11 @@ async def process_alerts():
                        style="display: inline-block; background: #1a5091; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-top: 10px;">
                        View Full Listing Details
                     </a>
+                    <hr style="border: none; border-top: 1px solid #eee; margin-top: 20px;" />
+                    <p style="font-size: 12px; color: #999; text-align: center;">
+                        Gorge Realty | 123 Main St, Hood River, OR 97031<br />
+                        <a href="{unsubscribe_url}" style="color: #999;">Unsubscribe</a> from these alerts
+                    </p>
                 </div>
                 """
 

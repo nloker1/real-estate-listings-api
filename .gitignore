@@ -5,9 +5,11 @@
 __pycache__/
 *.py[cod]
 *$py.class
-venv/
+venv*
 .venv/
 env/
+*.log
+nohup.out
 
 # Databases
 *.sqlite3

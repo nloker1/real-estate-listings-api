@@ -109,6 +109,9 @@ class Lead(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationship to searches
+    is_unsubscribed = Column(Boolean, default=False)
+    unsubscribed_at = Column(DateTime, nullable=True)
+    unsubscribe_token = Column(String, unique=True, index=True, nullable=True)
     searches = relationship("SavedSearch", back_populates="lead")
 
 class SavedSearch(Base):
