@@ -13,7 +13,7 @@ async def generate_daily_digest():
     print("Generating Daily Gorge Digest...")
     
     # Time window: Last 24 hours
-    yesterday = datetime.utcnow() - timedelta(days=3)
+    yesterday = datetime.utcnow() - timedelta(days=1)
     
     async with AsyncSessionLocal() as db:
         # 1. NEW LISTINGS (Created in last 24h)
