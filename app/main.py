@@ -45,9 +45,14 @@ app.add_middleware(
 )
 
 ZIP_MAP = {
-    "hood-river": "97031",
-    "white-salmon": "98672",
-    "the-dalles": "97058"
+    "hood-river": ["97031"],
+    "white-salmon": ["98672"],
+    "the-dalles": ["97058"],
+    "lyle-high-prairie": ["98635"],
+    "carson-stevenson": ["98648", "98610"],
+    "trout-lake": ["98650"],
+    "mosier": ["97040"],
+    "underwood": ["98651"]
 }
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -214,8 +219,8 @@ async def get_listings(
 async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)):
 
     # 1. VALIDATE CITY
-    target_zip = ZIP_MAP.get(city_slug)
-    if not target_zip:
+    target_zips = ZIP_MAP.get(city_slug)
+    if not target_zips:
         raise HTTPException(status_code=404, detail="Market not found for this city.")
 
     one_year_ago = datetime.now() - timedelta(days=365)
@@ -228,7 +233,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         func.percentile_cont(0.5).within_group(Listing.days_on_market).label("median_dom"),
         func.count(Listing.id).label("active_count")
     ).where(
-        Listing.zipcode == target_zip,
+        Listing.zipcode.in_(target_zips),
         Listing.status == 'Active',
         Listing.days_on_market < 730,
         Listing.property_type != 'Land',
@@ -246,7 +251,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         Listing.id.label("listing_id"),
         Listing.price
     ).where(
-        Listing.zipcode == target_zip,
+        Listing.zipcode.in_(target_zips),
         Listing.status == 'Sold',
         Listing.close_date >= one_year_ago,
         Listing.list_agent_name.isnot(None)
@@ -257,7 +262,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         Listing.id.label("listing_id"),
         Listing.price
     ).where(
-        Listing.zipcode == target_zip,
+        Listing.zipcode.in_(target_zips),
         Listing.status == 'Sold',
         Listing.close_date >= one_year_ago,
         Listing.buyer_agent_name.isnot(None)
@@ -293,7 +298,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
             COUNT(*) AS sales_count
         FROM listings
         WHERE
-            zipcode = :zipcode
+            zipcode = ANY(:zipcodes)
             AND status = 'Sold'
             AND close_date >= :one_year_ago
             AND property_type != 'Land'
@@ -304,7 +309,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
     """)
 
     trend_result = await db.execute(raw_sql, {
-        "zipcode": target_zip,
+        "zipcodes": target_zips,
         "one_year_ago": one_year_ago
     })
 
@@ -361,11 +366,12 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         Listing.days_on_market,
         Listing.created_at
     ).where(
-        Listing.zipcode == target_zip,
+        Listing.zipcode.in_(target_zips),
         Listing.created_at >= thirty_days_ago,
-        Listing.created_at != exclusion_timestamp, # Exclude the batch from the logic bug
+        Listing.created_at != exclusion_timestamp,
         Listing.is_published == True,
-        Listing.property_type != 'Land'
+        Listing.property_type != 'Land',
+        Listing.status.in_(['Active', 'Pending']) # Only show properties currently on market
     ).order_by(desc(Listing.created_at)).limit(15)
 
     recent_result = await db.execute(recent_listings_stmt)
@@ -406,7 +412,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         Listing.days_on_market,
         Listing.close_date
     ).where(
-        Listing.zipcode == target_zip,
+        Listing.zipcode.in_(target_zips),
         Listing.status == 'Sold',
         Listing.close_date >= thirty_days_ago,
         Listing.is_published == True,
@@ -453,7 +459,7 @@ async def get_market_hub_data(city_slug: str, db: AsyncSession = Depends(get_db)
         Listing.days_on_market,
         Listing.last_updated
     ).where(
-        Listing.zipcode == target_zip,
+        Listing.zipcode.in_(target_zips),
         Listing.status == 'Pending',
         Listing.last_updated >= thirty_days_ago,
         Listing.is_published == True,
