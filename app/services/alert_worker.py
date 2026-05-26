@@ -87,7 +87,7 @@ async def process_alerts():
             # ---------------------------------------------------------
             # 1. PROPERTY ALERT
             # ---------------------------------------------------------
-            if alert_type == "property":
+            if alert_type == "property" or criteria.get("mls_number"):
                 mls_number = criteria.get("mls_number")
                 if not mls_number:
                     continue
@@ -268,7 +268,7 @@ async def process_alerts():
                 if not new_listings:
                     continue
 
-                log_stmt = select(EmailLog.listing_id).where(EmailLog.search_id == search.id)
+                log_stmt = select(EmailLog.listing_id).where(EmailLog.user_email == lead.email)
                 log_result = await db.execute(log_stmt)
                 emailed_listing_ids = set(log_result.scalars().all())
 
@@ -297,7 +297,7 @@ async def process_alerts():
                         </a>
                         <hr style="border: none; border-top: 1px solid #eee; margin-top: 20px;" />
                         <p style="font-size: 12px; color: #999; text-align: center;">
-                            Gorge Realty | 123 Main St, Hood River, OR 97031<br />
+                            Gorge Realty | White Salmon, WA 98672 <br />
                             <a href="{unsubscribe_url}" style="color: #999;">Unsubscribe</a> from these alerts
                         </p>
                     </div>
