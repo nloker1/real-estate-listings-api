@@ -85,7 +85,7 @@ class Listing(Base):
     created_at = Column(DateTime, server_default=func.now())
     last_updated = Column(DateTime, onupdate=func.now())
 
-    images = relationship("ListingImage", back_populates="listing", cascade="all, delete-orphan")
+    images = relationship("ListingImage", back_populates="listing", cascade="all, delete-orphan", order_by="ListingImage.order")
 
 class ListingImage(Base):
     __tablename__ = "listing_images"

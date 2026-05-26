@@ -205,6 +205,9 @@ async def fetch_one_off_listings(mls_numbers):
             # Media Sync
             media_data = item.get('Media', [])
             if media_data:
+                # 1. Sort the raw media array using the URL suffix to fix RMLS out-of-order bugs
+                media_data = sorted(media_data, key=lambda x: get_media_order(x.get('MediaURL', '')))
+                
                 await db.execute(delete(ListingImage).where(ListingImage.listing_id == target_listing.id))
                 for idx, m in enumerate(media_data):
                     url = m.get('MediaURL')

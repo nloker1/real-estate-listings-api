@@ -87,3 +87,100 @@ INFO:     Finished server process [29904]
 INFO:     Started server process [29905]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/services/daily_digest.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [29905]
+INFO:     Started server process [67971]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [67971]
+INFO:     Started server process [68054]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [68054]
+INFO:     Started server process [68065]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [68065]
+INFO:     Started server process [68066]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [68066]
+INFO:     Started server process [68068]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [68068]
+INFO:     Started server process [68069]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [68069]
+INFO:     Started server process [68100]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Traceback (most recent call last):
+  File "/home/node/.local/bin/uvicorn", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/node/.local/lib/python3.11/site-packages/click/core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/node/.local/lib/python3.11/site-packages/click/core.py", line 1406, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/home/node/.local/lib/python3.11/site-packages/click/core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/node/.local/lib/python3.11/site-packages/click/core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/node/.local/lib/python3.11/site-packages/uvicorn/main.py", line 433, in main
+    run(
+  File "/home/node/.local/lib/python3.11/site-packages/uvicorn/main.py", line 601, in run
+    ChangeReload(config, target=server.run, sockets=[sock]).run()
+  File "/home/node/.local/lib/python3.11/site-packages/uvicorn/supervisors/basereload.py", line 52, in run
+    for changes in self:
+  File "/home/node/.local/lib/python3.11/site-packages/uvicorn/supervisors/basereload.py", line 71, in __next__
+    return self.should_restart()
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/node/.local/lib/python3.11/site-packages/uvicorn/supervisors/statreload.py", line 31, in should_restart
+    for file in self.iter_py_files():
+  File "/home/node/.local/lib/python3.11/site-packages/uvicorn/supervisors/statreload.py", line 51, in iter_py_files
+    for path in list(reload_dir.rglob("*.py")):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 969, in rglob
+    for p in selector.select_from(self):
+  File "/usr/lib/python3.11/pathlib.py", line 409, in _select_from
+    for p in successor_select(starting_point, is_dir, exists, scandir):
+  File "/usr/lib/python3.11/pathlib.py", line 356, in _select_from
+    with scandir(parent_path) as scandir_it:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 939, in _scandir
+    return os.scandir(self)
+           ^^^^^^^^^^^^^^^^
+OSError: [Errno 24] Too many open files: '/home/node/.openclaw/workspace/real-estate-listings-api/.git/objects/f1'

@@ -20,7 +20,18 @@ from app.database import AsyncSessionLocal
 from sqlalchemy import select, delete
 from sqlalchemy.orm import configure_mappers
 
+import re
+
 configure_mappers()
+
+def get_media_order(url):
+    """Extract the numeric order from the end of an RMLS photo URL (e.g. ...-1.jpg -> 1)"""
+    if not url:
+        return 999
+    match = re.search(r'-(\d+)\.jpg$', url, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return 999
 
 def send_alert_email(subject, body):
     """Send an alert email via Gmail SMTP."""
@@ -360,6 +371,9 @@ async def sync_rmls_listings():
             first_photo_url = item.get('Photo1URL')
 
             if media_data:
+                # 1. Sort the raw media array using the URL suffix to fix RMLS out-of-order bugs
+                media_data = sorted(media_data, key=lambda x: get_media_order(x.get('MediaURL', '')))
+                
                 await db.execute(delete(ListingImage).where(ListingImage.listing_id == target_listing.id))
                 for idx, m in enumerate(media_data):
                     url = m.get('MediaURL')

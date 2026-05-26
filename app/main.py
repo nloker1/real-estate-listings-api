@@ -19,6 +19,8 @@ from . import models, schemas
 from app.database import get_db
 from app.models import Listing
 
+from app.routers import alerts
+
 router = APIRouter()
 
 app = FastAPI(
@@ -43,6 +45,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(alerts.router)
 
 ZIP_MAP = {
     "hood-river": ["97031"],
