@@ -70,6 +70,43 @@ async def get_map_page(request: Request):
 def health():
     return {"status": "ok", "message": "API is running!"}
 
+@app.get("/p/{mls_number}", response_class=HTMLResponse)
+async def property_sms_preview(mls_number: str, db: AsyncSession = Depends(get_db)):
+    # Fetch the property data from your database
+    stmt = select(Listing).where(Listing.mls_number == mls_number)
+    result = await db.execute(stmt)
+    listing = result.scalar_one_or_none()
+    
+    if not listing:
+        # If the property doesn't exist, just send them to your main home page
+        return "<script>window.location.href='https://www.gorgerealty.com';</script>"
+    
+    # Format the text for the iMessage/Android preview card
+    title = f"{listing.address} | ${listing.price:,}"
+    description = f"{listing.beds} Bed, {listing.baths} Bath, {listing.sqft} SqFt."
+    image_url = listing.main_photo_url 
+    redirect_url = f"https://www.gorgerealty.com/listings/{mls_number}"
+
+    # Return raw HTML containing the OG tags for the phone, and a redirect for the human
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta property="og:title" content="{title}" />
+        <meta property="og:description" content="{description}" />
+        <meta property="og:image" content="{image_url}" />
+        <meta property="og:url" content="{redirect_url}" />
+        <meta property="og:type" content="website" />
+        <script>
+            window.location.href = "{redirect_url}";
+        </script>
+    </head>
+    <body>
+        <p>Redirecting to Gorge Realty...</p>
+    </body>
+    </html>
+    """
+
 # UPDATE 2: Improved Detail View
 @app.get("/api/listings/{mls_number}")
 async def get_listing(mls_number: str, db: AsyncSession = Depends(get_db)):

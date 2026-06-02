@@ -54,7 +54,7 @@ async def send_resend_email(to_email, subject, html_content, db, search, listing
         if "domain" in error_msg or "verify" in error_msg or "unauthorized" in error_msg:
             print("Domain/Auth error detected. Skipping timestamp update for retry.")
 
-async def process_alerts():
+async def process_alerts(test_lead_email=None):
     print("Checking for Saved Search Matches...")
     async with AsyncSessionLocal() as db:
         
@@ -65,6 +65,11 @@ async def process_alerts():
             .where(SavedSearch.is_active == True)
             .where(Lead.is_unsubscribed == False)
         )
+        
+        # QA TEST HOOK: If testing, only process the test user so we don't mess up real data
+        if test_lead_email:
+            stmt = stmt.where(Lead.email == test_lead_email)
+            
         result = await db.execute(stmt)
         searches = result.scalars().all()
         
