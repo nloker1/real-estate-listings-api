@@ -108,7 +108,7 @@ async def property_sms_preview(mls_number: str, db: AsyncSession = Depends(get_d
         description = f"{beds} Bed, {baths} Bath {sqft}".strip()
         
         # Safeguard 5: Fallback image if main_photo_url is empty
-        image_url = listing.main_photo_url if listing.main_photo_url else "https://www.gorgerealty.com/logo.png"
+        image_url = listing.photo_url if listing.photo_url else "https://www.gorgerealty.com/logo.png"
 
         # Return raw HTML containing the OG tags for the phone, and a redirect for the human
         return f"""
