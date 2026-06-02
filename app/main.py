@@ -80,14 +80,20 @@ async def property_sms_preview(mls_number: str, db: AsyncSession = Depends(get_d
     if not listing:
         # If the property doesn't exist, just send them to your main home page
         return "<script>window.location.href='https://www.gorgerealty.com';</script>"
+
+    # Safe address check & slug generation
+    raw_address = listing.address if listing.address else "property"
+    address_slug = raw_address.lower().replace(" ", "-").replace(",", "")
+
+    #  FIXED: Added curly braces so it injects the dynamic address string
+    redirect_url = f"https://www.gorgerealty.com/property/{address_slug}/{listing.mls_number}"
     
     # Format the text for the iMessage/Android preview card
     title = f"{listing.address} | ${listing.price:,}"
     description = f"{listing.beds} Bed, {listing.baths} Bath, {listing.sqft} SqFt."
     image_url = listing.main_photo_url 
-    redirect_url = f"https://www.gorgerealty.com/listings/{mls_number}"
 
-    # Return raw HTML containing the OG tags for the phone, and a redirect for the human
+    #  FIXED: Properly closed the triple-quoted f-string block at the bottom
     return f"""
     <!DOCTYPE html>
     <html>
