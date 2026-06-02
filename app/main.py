@@ -72,46 +72,69 @@ def health():
 
 @app.get("/p/{mls_number}", response_class=HTMLResponse)
 async def property_sms_preview(mls_number: str, db: AsyncSession = Depends(get_db)):
-    # Fetch the property data from your database
-    stmt = select(Listing).where(Listing.mls_number == mls_number)
-    result = await db.execute(stmt)
-    listing = result.scalar_one_or_none()
-    
-    if not listing:
-        # If the property doesn't exist, just send them to your main home page
+    try:
+        # Fetch the property data from your database
+        stmt = select(Listing).where(Listing.mls_number == mls_number)
+        result = await db.execute(stmt)
+        listing = result.scalar_one_or_none()
+        
+        if not listing:
+            # Safeguard 1: If property doesn't exist, redirect to home page
+            return "<script>window.location.href='https://www.gorgerealty.com';</script>"
+
+        # Safeguard 2: Handle missing addresses gracefully
+        display_address = listing.address if listing.address else "Exclusive Listing"
+        address_slug = display_address.lower().replace(" ", "-").replace(",", "")
+
+        # Build your dynamic React frontend routing path
+        redirect_url = f"https://www.gorgerealty.com/property/{address_slug}/{listing.mls_number}"
+        
+        # Safeguard 3: Prevent the comma-formatting crash if price is missing/None
+        if listing.price is not None:
+            try:
+                formatted_price = f"${int(listing.price):,}"
+            except (ValueError, TypeError):
+                formatted_price = f"${listing.price}"
+        else:
+            formatted_price = "Contact for Price"
+
+        # Safeguard 4: Extract specs safely with fallback text
+        beds = listing.beds if listing.beds is not None else "--"
+        baths = listing.baths if listing.baths is not None else "--"
+        sqft = f"{listing.sqft:,} SqFt" if (listing.sqft is not None and str(listing.sqft).isdigit()) else ""
+
+        # Format the text for the iMessage/Android preview card
+        title = f"{display_address} | {formatted_price}"
+        description = f"{beds} Bed, {baths} Bath {sqft}".strip()
+        
+        # Safeguard 5: Fallback image if main_photo_url is empty
+        image_url = listing.main_photo_url if listing.main_photo_url else "https://www.gorgerealty.com/logo.png"
+
+        # Return raw HTML containing the OG tags for the phone, and a redirect for the human
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="{title}" />
+            <meta property="og:description" content="{description}" />
+            <meta property="og:image" content="{image_url}" />
+            <meta property="og:url" content="{redirect_url}" />
+            <meta property="og:type" content="website" />
+            <script>
+                window.location.href = "{redirect_url}";
+            </script>
+        </head>
+        <body>
+            <p>Redirecting to Gorge Realty...</p>
+        </body>
+        </html>
+        """
+        
+    except Exception as e:
+        # Emergency Catch-All: If ANYTHING else fails, print the error to server logs 
+        # but do NOT throw a 500 error to the browser. Just silently redirect the user.
+        print(f"SMS Preview Error Handler triggered: {str(e)}")
         return "<script>window.location.href='https://www.gorgerealty.com';</script>"
-
-    # Safe address check & slug generation
-    raw_address = listing.address if listing.address else "property"
-    address_slug = raw_address.lower().replace(" ", "-").replace(",", "")
-
-    #  FIXED: Added curly braces so it injects the dynamic address string
-    redirect_url = f"https://www.gorgerealty.com/property/{address_slug}/{listing.mls_number}"
-    
-    # Format the text for the iMessage/Android preview card
-    title = f"{listing.address} | ${listing.price:,}"
-    description = f"{listing.beds} Bed, {listing.baths} Bath, {listing.sqft} SqFt."
-    image_url = listing.main_photo_url 
-
-    #  FIXED: Properly closed the triple-quoted f-string block at the bottom
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta property="og:title" content="{title}" />
-        <meta property="og:description" content="{description}" />
-        <meta property="og:image" content="{image_url}" />
-        <meta property="og:url" content="{redirect_url}" />
-        <meta property="og:type" content="website" />
-        <script>
-            window.location.href = "{redirect_url}";
-        </script>
-    </head>
-    <body>
-        <p>Redirecting to Gorge Realty...</p>
-    </body>
-    </html>
-    """
 
 # UPDATE 2: Improved Detail View
 @app.get("/api/listings/{mls_number}")
