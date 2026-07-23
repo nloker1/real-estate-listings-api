@@ -20,6 +20,7 @@ from app.database import get_db
 from app.models import Listing
 
 from app.routers import alerts
+from app.routers import webhooks
 
 router = APIRouter()
 
@@ -47,6 +48,7 @@ app.add_middleware(
 )
 
 app.include_router(alerts.router)
+app.include_router(webhooks.router)
 
 ZIP_MAP = {
     "hood-river": ["97031"],
@@ -271,14 +273,10 @@ async def get_listings(
     result = await db.execute(query)
     rows = result.all()
 
-    # FIX: Convert the SQLAlchemy "Rows" into standard Python Dictionaries
-    return [dict(row._mapping) for row in rows]
-
-    # UPDATE 4: Compliance Logic for "Undisclosed Address"
-    # This prevents sensitive data from ever leaving your server
+    # ✅ FIXED: Apply compliance check before returning
     output = []
     for row in rows:
-        data = row._asdict()
+        data = dict(row._mapping)
         if not data.get('is_address_exposed', True):
             data['address'] = "Address Undisclosed"
         output.append(data)

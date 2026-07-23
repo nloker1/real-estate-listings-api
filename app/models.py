@@ -142,6 +142,11 @@ class EmailLog(Base):
     sent_at = Column(DateTime(timezone=True), server_default=func.now())
     opened_at = Column(DateTime(timezone=True), nullable=True)
     clicked_at = Column(DateTime(timezone=True), nullable=True)
+
+    # 🟢 NEW: Extra Engagement Metrics
+    open_count = Column(Integer, default=0)
+    click_count = Column(Integer, default=0)
+    last_clicked_url = Column(Text, nullable=True)
     
     # Resend ID (Useful for debugging)
     message_id = Column(String, nullable=True)
