@@ -257,6 +257,17 @@ async def process_alerts(test_lead_email=None):
                     query = query.where(Listing.baths >= float(criteria['minBaths']))
                 if criteria.get('propertyType'):
                     query = query.where(Listing.property_type == criteria['propertyType'])
+
+                # --- ADDED FILTERS BELOW ---
+                if criteria.get('minSqft'):
+                    query = query.where(Listing.sqft >= int(criteria['minSqft']))
+                if criteria.get('maxSqft'):
+                    query = query.where(Listing.sqft <= int(criteria['maxSqft']))
+                if criteria.get('minAcres'):
+                    query = query.where(Listing.acres >= float(criteria['minAcres']))
+                if criteria.get('maxAcres'):
+                    query = query.where(Listing.acres <= float(criteria['maxAcres']))
+                # ---------------------------
                 
                 if criteria.get('cities'):
                     city_filters = []
