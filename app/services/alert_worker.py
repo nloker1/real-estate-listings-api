@@ -1,14 +1,17 @@
 import os
 import asyncio
-import resend
 import re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import joinedload
-from app.database import AsyncSessionLocal
 from app.models import SavedSearch, Listing, EmailLog, Lead
 
-resend.api_key = os.getenv("RESEND_API_KEY")
+def send_with_resend(params):
+    if os.getenv("APP_ENV", "").strip().lower() == "test":
+        raise RuntimeError("Real email delivery is disabled in test mode")
+    import resend
+    resend.api_key = os.getenv("RESEND_API_KEY")
+    return resend.Emails.send(params)
 
 def create_slug(address):
     """Simple Python version of the frontend slugify logic."""
@@ -21,42 +24,51 @@ def create_slug(address):
     slug = re.sub(r'\-\-+', '-', slug)
     return slug
 
-async def send_resend_email(to_email, subject, html_content, db, search, listing_id_str):
+async def send_resend_email(to_email, subject, html_content, db, search, listing_id_str,
+                            *, sender, now, delay, criteria_on_success=None):
+    params = {
+        "from": "Gorge Realty Alerts <alerts@gorgerealty.com>",
+        "to": [to_email], "subject": subject, "html": html_content,
+    }
     try:
-        params = {
-            "from": "Gorge Realty Alerts <alerts@gorgerealty.com>",
-            "to": [to_email],
-            "subject": subject,
-            "html": html_content,
-        }
-        email_response = resend.Emails.send(params)
-        
-        if email_response and email_response.get("id"):
-            new_log = EmailLog(
-                search_id=search.id,
-                listing_id=listing_id_str,
-                user_email=to_email,
-                message_id=email_response.get("id")
-            )
-            db.add(new_log)
-            search.last_alert_sent = datetime.utcnow()
-            await db.commit()
-            print(f"Sent alert to {to_email} (Logged)")
-        else:
-            print(f"Resend accepted request but returned no ID for {to_email}")
+        response = sender(params)
+    except Exception:
+        # No DB changes have occurred; rollback would expire loaded ORM objects.
+        print(f"Provider failed for search {search.id}; retry on next run.")
+        await asyncio.sleep(delay)
+        return False
+    if not response or not response.get("id"):
+        print(f"No message ID for search {search.id}; retry on next run.")
+        await asyncio.sleep(delay)
+        return False
+    db.add(EmailLog(search_id=search.id, listing_id=listing_id_str,
+                    user_email=to_email, message_id=response["id"]))
+    search.last_alert_sent = naive_utc(now())
+    if criteria_on_success is not None:
+        search.criteria = criteria_on_success
+    # Commit the baseline and log together. Persistence failures stop the job.
+    await db.commit()
+    await asyncio.sleep(delay)
+    return True
 
-        # RATE LIMIT: Resend allows 2 req/sec. 0.6s delay keeps us safe.
-        await asyncio.sleep(0.9)
-    except Exception as e:
-        await db.rollback()
-        error_msg = str(e).lower()
-        print(f"Resend error: {str(e)}")
-        if "domain" in error_msg or "verify" in error_msg or "unauthorized" in error_msg:
-            print("Domain/Auth error detected. Skipping timestamp update for retry.")
 
-async def process_alerts(test_lead_email=None):
+def naive_utc(value):
+    # Current DB columns are naive; normalize aware clock inputs before comparing.
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
+async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
+                         test_lead_email=None):
+    test_mode = os.getenv("APP_ENV", "").strip().lower() == "test"
+    if test_mode and (session_factory is None or sender is None):
+        raise RuntimeError("Test mode requires an explicit database session factory and fake sender")
+    if session_factory is None:
+        from app.database import AsyncSessionLocal
+        session_factory = AsyncSessionLocal
+    sender = sender or send_with_resend
+    now = now or datetime.utcnow
     print("Checking for Saved Search Matches...")
-    async with AsyncSessionLocal() as db:
+    async with session_factory() as db:
         
         stmt = (
             select(SavedSearch)
@@ -66,7 +78,7 @@ async def process_alerts(test_lead_email=None):
             .where(Lead.is_unsubscribed == False)
         )
         
-        # QA TEST HOOK: If testing, only process the test user so we don't mess up real data
+        # Optional recipient filter; not a substitute for isolated DB/email dependencies.
         if test_lead_email:
             stmt = stmt.where(Lead.email == test_lead_email)
             
@@ -83,9 +95,7 @@ async def process_alerts(test_lead_email=None):
             criteria = search.criteria
             alert_type = criteria.get("alert_type")
             
-            since_time = search.last_alert_sent or search.created_at
-            if since_time and since_time.tzinfo is not None:
-                since_time = since_time.replace(tzinfo=None)
+            current_time = naive_utc(now())
                 
             unsubscribe_url = f"https://gorgerealty.com/unsubscribe?token={lead.unsubscribe_token}" if lead.unsubscribe_token else "https://gorgerealty.com/contact"
 
@@ -122,11 +132,10 @@ async def process_alerts(test_lead_email=None):
                     status_changed = last_status != updated_listing.status
                     
                     if price_changed or status_changed:
-                        # Update baseline so we don't alert again for this state
+                        # Apply the new baseline only after provider acceptance.
                         new_criteria = dict(criteria)
                         new_criteria["last_price"] = updated_listing.price
                         new_criteria["last_status"] = updated_listing.status
-                        search.criteria = new_criteria
                         
                         slug = create_slug(updated_listing.address)
                         property_url = f"https://gorgerealty.com/property/{slug}/{updated_listing.mls_number}"
@@ -157,14 +166,17 @@ async def process_alerts(test_lead_email=None):
                             </p>
                         </div>
                         """
-                        await send_resend_email(lead.email, subject, html_content, db, search, str(mls_number))
+                        await send_resend_email(lead.email, subject, html_content, db, search, str(mls_number),
+                                                sender=sender, now=now, delay=delay,
+                                                criteria_on_success=new_criteria)
 
             # ---------------------------------------------------------
             # 2. MARKET ALERT
             # ---------------------------------------------------------
             elif alert_type == "market":
                 # Only send weekly
-                if (datetime.utcnow() - since_time) < timedelta(days=6):
+                since_time = naive_utc(search.last_alert_sent or search.created_at)
+                if (current_time - since_time) < timedelta(days=7):
                     continue
                     
                 city_name = criteria.get("city")
@@ -172,13 +184,15 @@ async def process_alerts(test_lead_email=None):
                     continue
                     
                 # Grab statistics for that city in the last week to make it interesting
-                one_week_ago = datetime.utcnow() - timedelta(days=7)
+                one_week_ago = current_time - timedelta(days=7)
                 
                 # 1. New/Updated Active Count
                 q_active = select(func.count(Listing.id)).where(
-                    Listing.city.ilike(f"%{city_name}%"),
+                    func.replace(Listing.city, " ", "").ilike(city_name.replace(" ", "")),
+                    Listing.is_published == True,
                     Listing.status == 'Active',
-                    Listing.last_updated > one_week_ago
+                    Listing.last_updated > one_week_ago,
+                    Listing.last_updated <= current_time
                 )
                 res_active = await db.execute(q_active)
                 active_count = res_active.scalar() or 0
@@ -188,20 +202,24 @@ async def process_alerts(test_lead_email=None):
                     func.avg(Listing.price),
                     func.max(Listing.price)
                 ).where(
-                    Listing.city.ilike(f"%{city_name}%"),
+                    func.replace(Listing.city, " ", "").ilike(city_name.replace(" ", "")),
+                    Listing.is_published == True,
                     Listing.status == 'Active',
-                    Listing.last_updated > one_week_ago
+                    Listing.last_updated > one_week_ago,
+                    Listing.last_updated <= current_time
                 )
                 res_stats = await db.execute(q_stats)
                 avg_price, max_price = res_stats.first()
                 avg_price = int(avg_price) if avg_price else 0
                 max_price = int(max_price) if max_price else 0
                 
-                # 3. Properties that went Pending
+                # 3. Currently pending properties whose status changed this week
                 q_pending = select(func.count(Listing.id)).where(
-                    Listing.city.ilike(f"%{city_name}%"),
+                    func.replace(Listing.city, " ", "").ilike(city_name.replace(" ", "")),
+                    Listing.is_published == True,
                     Listing.status == 'Pending',
-                    Listing.last_updated > one_week_ago
+                    Listing.status_date > one_week_ago,
+                    Listing.status_date <= current_time
                 )
                 res_pending = await db.execute(q_pending)
                 pending_count = res_pending.scalar() or 0
@@ -221,9 +239,9 @@ async def process_alerts(test_lead_email=None):
                     
                     <ul style="font-size: 16px; line-height: 1.6; padding-left: 20px; background: #f9f9f9; padding: 15px 15px 15px 35px; border-radius: 5px;">
                         <li><strong>{active_count}</strong> new or updated active listings</li>
-                        <li><strong>{pending_count}</strong> homes went pending</li>
+                        <li><strong>{pending_count}</strong> currently pending homes with a status change this week</li>
                         <li><strong>{avg_price_str}</strong> average listing price</li>
-                        <li><strong>{max_price_str}</strong> highest priced new listing</li>
+                        <li><strong>{max_price_str}</strong> highest priced new or updated active listing</li>
                     </ul>
 
                     <a href="{market_url}" 
@@ -237,7 +255,8 @@ async def process_alerts(test_lead_email=None):
                     </p>
                 </div>
                 """
-                await send_resend_email(lead.email, subject, html_content, db, search, f"market-{city_slug}")
+                await send_resend_email(lead.email, subject, html_content, db, search, f"market-{city_slug}",
+                                        sender=sender, now=now, delay=delay)
 
             # ---------------------------------------------------------
             # 3. LEGACY MAP SEARCH ALERT
@@ -245,7 +264,11 @@ async def process_alerts(test_lead_email=None):
             else:
                 query = select(Listing).where(Listing.is_published == True)
                 query = query.where(Listing.status == 'Active')
-                query = query.where(Listing.created_at > since_time)
+                query = query.where(Listing.created_at > naive_utc(search.created_at))
+                query = query.where(~select(EmailLog.id).where(
+                    EmailLog.search_id == search.id,
+                    EmailLog.listing_id == Listing.mls_number,
+                ).exists())
                 
                 if criteria.get('minPrice'):
                     query = query.where(Listing.price >= int(criteria['minPrice']))
@@ -264,9 +287,9 @@ async def process_alerts(test_lead_email=None):
                 if criteria.get('maxSqft'):
                     query = query.where(Listing.sqft <= int(criteria['maxSqft']))
                 if criteria.get('minAcres'):
-                    query = query.where(Listing.acres >= float(criteria['minAcres']))
+                    query = query.where(Listing.acreage >= float(criteria['minAcres']))
                 if criteria.get('maxAcres'):
-                    query = query.where(Listing.acres <= float(criteria['maxAcres']))
+                    query = query.where(Listing.acreage <= float(criteria['maxAcres']))
                 # ---------------------------
                 
                 if criteria.get('cities'):
@@ -284,14 +307,7 @@ async def process_alerts(test_lead_email=None):
                 if not new_listings:
                     continue
 
-                log_stmt = select(EmailLog.listing_id).where(EmailLog.user_email == lead.email)
-                log_result = await db.execute(log_stmt)
-                emailed_listing_ids = set(log_result.scalars().all())
-
                 for listing in new_listings:
-                    if listing.mls_number in emailed_listing_ids:
-                        continue
-
                     beds_str = f"{listing.beds}" if listing.beds is not None else "—"
                     baths_str = f"{listing.baths}" if listing.baths is not None else "—"
                     sqft_str = f"{listing.sqft:,}" if listing.sqft is not None else "—"
@@ -318,7 +334,8 @@ async def process_alerts(test_lead_email=None):
                         </p>
                     </div>
                     """
-                    await send_resend_email(lead.email, subject, html_content, db, search, str(listing.mls_number))
+                    await send_resend_email(lead.email, subject, html_content, db, search, str(listing.mls_number),
+                                            sender=sender, now=now, delay=delay)
 
 if __name__ == "__main__":
     asyncio.run(process_alerts())
