@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey, JSON, Date, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey, JSON, Date, Text, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -149,8 +149,27 @@ class EmailLog(Base):
     last_clicked_url = Column(Text, nullable=True)
     
     # Resend ID (Useful for debugging)
-    message_id = Column(String, nullable=True)
+    message_id = Column(String, nullable=True, index=True)
 
     search = relationship("SavedSearch")
+
+
+class EmailEvent(Base):
+    """Verified provider events retained even before their email log exists."""
+    __tablename__ = "email_events"
+    __table_args__ = (
+        CheckConstraint("processing_status IN ('pending', 'processed')", name="ck_email_events_status"),
+        Index("ix_email_events_pending", "processing_status", "message_id"),
+        Index("ix_email_events_log_time", "email_log_id", "occurred_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    provider_event_id = Column(String(255), nullable=False, unique=True)
+    message_id = Column(String(255), nullable=False, index=True)
+    event_type = Column(String(80), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    details = Column(JSON, nullable=False, default=dict)
+    processing_status = Column(String(20), nullable=False, default="pending")
+    email_log_id = Column(Integer, ForeignKey("email_logs.id", ondelete="SET NULL"), nullable=True)
 
 
