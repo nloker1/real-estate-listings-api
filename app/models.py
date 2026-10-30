@@ -118,7 +118,7 @@ class SavedSearch(Base):
     __tablename__ = "saved_searches"
     
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(Integer, ForeignKey("leads.id"))
+    lead_id = Column(Integer, ForeignKey("leads.id"), index=True)
     
     # This stores the filters: {"min_price": 500000, "beds": 3, "zip": "98672"}
     criteria = Column(JSON, nullable=False)
@@ -134,7 +134,7 @@ class EmailLog(Base):
     __tablename__ = "email_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    search_id = Column(Integer, ForeignKey("saved_searches.id"))
+    search_id = Column(Integer, ForeignKey("saved_searches.id"), index=True)
     listing_id = Column(String, index=True) # The MLS Number
     user_email = Column(String, index=True)
     

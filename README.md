@@ -198,3 +198,103 @@ Coverage includes invalid/missing/expired signatures, raw UTF-8, malformed and
 oversized payloads, duplicate and changed-duplicate requests, out-of-order times,
 early and ambiguous associations, reconciliation, distinct delivery outcomes,
 and storage failure followed by a successful retry.
+
+### Private client activity workspace
+
+The React frontend now has `/admin`, backed by `/api/admin` in FastAPI. This first
+version is read-only and uses a single owner account configured on the server.
+It includes a searchable/paginated client directory, saved search criteria and
+settings, paginated email history, and paginated event timelines. No client
+editing, password reset, multi-user roles, or email sending is exposed here.
+
+Reporting joins emails to clients through SavedSearch.lead_id (not an email-string
+match). It excludes BACKFILL_DRY_RUN logs from email totals. Recorded open/click
+counts come from processed unique EmailEvent rows, separately from legacy
+EmailLog counters. Delivery status uses provider event occurrence time, not the
+arrival order. An acceptance log does not prove delivery or readership. Clicks on
+matching property URLs are labeled listing clicks; other link clicks remain
+separate timeline entries. Provider-reported failures appear in email history;
+worker exceptions before a send is logged cannot appear there yet.
+
+Existing email tables/event migration are required; authentication adds no new
+tables. `migrations/002_admin_reporting_indexes.sql` is an optional performance
+migration for search/client and email/search joins. It has not been applied.
+
+Configure the owner account with this **local interactive** helper:
+
+```bash
+venv/bin/python -m scripts.admin_credentials
+```
+
+It prompts for a password twice and prints ADMIN_USERNAME, ADMIN_PASSWORD_HASH,
+and ADMIN_SESSION_SECRET. Save those values privately in the backend environment
+or its root .env in production. Never commit or send them in chat. The helper
+uses scrypt with a random salt; the plaintext password is not printed or stored.
+Do not put any of these values in REACT_APP_* variables.
+
+Also set ADMIN_ALLOWED_ORIGINS to the exact frontend origin, such as
+`https://gorgerealty.com` (comma-separated if multiple origins are needed).
+Restart the backend after changing configuration. Missing admin configuration
+fails closed with 503. Every reporting endpoint requires an authorized session;
+client data and session responses have Cache-Control: no-store.
+
+Sessions use host-only HttpOnly, SameSite=Strict cookies, secure by default, with
+an eight-hour expiry. Login/logout check the request origin; logout also requires
+a session CSRF token. Password validation runs in a worker thread. Login has a
+bounded per-process limit of ten attempts per ten minutes per source IP. For a
+public deployment with multiple backend processes, also configure a shared
+reverse-proxy login rate limit; do not treat the per-process limit as distributed.
+Serve the UI/API over HTTPS, redirect HTTP at the proxy, preserve the public host,
+and trust forwarded headers only from your reverse proxy. Configure CORS if an
+allowed admin origin is added beyond the existing public/local frontend origins.
+Same-site frontend/API hosting or a same-origin /api proxy is required; unrelated
+cross-site domains are intentionally not supported by this cookie policy.
+
+Signing out clears the browser cookie; it does not revoke a copied token on the
+server. Changing the password hash, username, or session secret invalidates all
+existing tokens. Treat this as a single-owner account; shared staff access/SSO
+and per-session revocation should be added before expanding to multiple users.
+
+For safe local preview:
+
+1. Start the disposable local PostgreSQL container. In the backend terminal,
+   export APP_ENV=test and your guarded TEST_DATABASE_URL. Do not use the normal
+   production DATABASE_URL. Test mode skips the existing root .env.
+2. Run the credential helper and **export** its three generated settings in that
+   terminal (they must be environment variables in test mode). Nothing is loaded
+   automatically from .env in this mode.
+3. Create only the fictional admin_demo schema, then start the local backend:
+
+   ```bash
+   venv/bin/python -m scripts.seed_admin_demo
+   venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+   ```
+
+4. In the frontend repository, run npm start and open
+   `http://localhost:3000/admin`. Use the password chosen in the helper. Match
+   hostnames (localhost with localhost, or 127.0.0.1 with 127.0.0.1).
+
+In test mode, admin reporting selects only admin_demo through schema translation.
+Other application endpoints do not use that schema. The demo seed resets only
+that dedicated schema with fictional clients, searches, log rows, and events;
+it does not send email or load .env. It is refused without the guarded test
+configuration. Do not run alert jobs as part of a UI preview.
+
+The frontend uses REACT_APP_ADMIN_API_URL if explicitly configured, otherwise
+port 8000 on the same loopback hostname during local development and same-origin
+/api/admin in production. It never persists passwords or session tokens in browser
+storage. The dev/test cookie allows HTTP; do not set APP_ENV=test or development
+on production. Ensure Nginx sends /api/admin requests to FastAPI and serves /admin
+and /admin/* through the React SPA fallback. Static admin HTML/JS contains no
+client records; authentication is enforced at each API endpoint.
+
+Verification:
+
+```bash
+RUN_ALERT_DB_TESTS=1 venv/bin/python -B -m unittest discover -s tests -v
+```
+
+Use explicit APP_ENV=test and TEST_DATABASE_URL for database tests. Tests create
+and roll back unique schemas, use synthetic owner credentials, and access no
+production services. Frontend tests mock every fetch and exercise sign-in,
+client history, event timeline, expired sessions, logout, search, and safe links.

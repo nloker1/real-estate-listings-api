@@ -21,6 +21,7 @@ from app.models import Listing
 
 from app.routers import alerts
 from app.routers import webhooks
+from app.routers import admin
 
 router = APIRouter()
 
@@ -49,6 +50,8 @@ app.add_middleware(
 
 app.include_router(alerts.router)
 app.include_router(webhooks.router)
+app.include_router(admin.router)
+app.middleware("http")(admin.private_headers)
 
 ZIP_MAP = {
     "hood-river": ["97031"],
