@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import os
 import asyncio
 import resend
@@ -10,6 +11,7 @@ from app.models import Listing, Lead, SavedSearch
 resend.api_key = os.getenv("RESEND_API_KEY")
 
 async def generate_daily_digest():
+    require_writable_mode()
     print("Generating Daily Gorge Digest...")
     
     # Time window: Last 24 hours

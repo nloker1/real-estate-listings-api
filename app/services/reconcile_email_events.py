@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 """Periodic reconciliation of verified events received before their email logs."""
 import asyncio
 import logging
@@ -6,6 +7,7 @@ from app.services.email_events import reconcile_pending
 
 
 async def reconcile(session_factory):
+    require_writable_mode()
     async with session_factory() as db:
         applied = await reconcile_pending(db)
         await db.commit()

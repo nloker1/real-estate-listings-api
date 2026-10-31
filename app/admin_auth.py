@@ -38,7 +38,7 @@ def auth_config():
 
 
 def secure_cookie():
-    return os.getenv("APP_ENV", "").lower() not in {"test", "development"}
+    return os.getenv("APP_ENV", "").lower() not in {"test", "development", "preview"}
 
 
 def verify_password(password, encoded):
@@ -50,8 +50,10 @@ def origin_check(request):
     origin = request.headers.get("origin", "").rstrip("/")
     allowed = {value.strip().rstrip("/") for value in os.getenv("ADMIN_ALLOWED_ORIGINS", "").split(",") if value.strip()}
     allowed.add(str(request.base_url).rstrip("/"))
-    if os.getenv("APP_ENV", "").lower() in {"test", "development"}:
+    if os.getenv("APP_ENV", "").lower() in {"test", "development", "preview"}:
         allowed.update({"http://localhost:3000", "http://127.0.0.1:3000"})
+    if os.getenv("APP_ENV", "").lower() == "preview":
+        allowed.update({"http://localhost:3001", "http://127.0.0.1:3001"})
     if not origin or origin not in allowed:
         raise HTTPException(403, "Request origin is not allowed", headers={"Cache-Control": "no-store"})
 

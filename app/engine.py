@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import resend
 import os
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,7 @@ async def process_alerts(db: AsyncSession): # Changed to async def
     """
     The Match Engine: Finds new matches and logs them using Async logic.
     """
+    require_writable_mode()
     # 1. Get all active searches (Async Syntax)
     result = await db.execute(select(models.SavedSearch).filter(models.SavedSearch.is_active == True))
     active_searches = result.scalars().all()
@@ -50,6 +52,7 @@ def send_alert_email(email, listing):
     """
     Helper to format the HTML and send via Resend.
     """
+    require_writable_mode()
     return resend.Emails.send({
         "from": "Gorge Property Search <alerts@gorgerealty.com>",
         "to": email,

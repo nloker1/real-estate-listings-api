@@ -267,15 +267,18 @@ For safe local preview:
 
    ```bash
    venv/bin/python -m scripts.seed_admin_demo
-   venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+   venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
    ```
 
 4. In the frontend repository, run npm start and open
    `http://localhost:3000/admin`. Use the password chosen in the helper. Match
    hostnames (localhost with localhost, or 127.0.0.1 with 127.0.0.1).
 
-In test mode, admin reporting selects only admin_demo through schema translation.
-Other application endpoints do not use that schema. The demo seed resets only
+In test mode, admin reporting and endpoints using get_db select admin_demo through
+schema translation. This lets /properties and /map preview the same fictional
+listings. My Listings fixtures include the agent filter and two sold examples
+with different close dates, plus a local placeholder image. Production schema
+selection is unchanged. The demo seed resets only
 that dedicated schema with fictional clients, searches, log rows, and events;
 it does not send email or load .env. It is refused without the guarded test
 configuration. Do not run alert jobs as part of a UI preview.
@@ -298,3 +301,114 @@ Use explicit APP_ENV=test and TEST_DATABASE_URL for database tests. Tests create
 and roll back unique schemas, use synthetic owner credentials, and access no
 production services. Frontend tests mock every fetch and exercise sign-in,
 client history, event timeline, expired sessions, logout, search, and safe links.
+
+### Local UI with live production data (read-only preview)
+
+Use the dedicated preview profile when you want to debug real recorded activity
+locally. It does not use Docker or fictional seed data, and does not change the
+normal `.env`. This is separate from `APP_ENV=test`.
+
+One-time configuration, from the local backend checkout:
+
+```bash
+venv/bin/python -m scripts.configure_preview --tunnel
+```
+
+This reads only DATABASE_URL from the existing local .env and creates a private,
+Git-ignored `.env.preview.local` (file mode 0600). It prompts for a new local admin
+password; username is admin. The production admin password is unaffected. Provider
+credentials are not copied. The generated file holds the database URL, password
+hash, and local session secret: never commit it or share it in chat. Existing
+preview files are not overwritten; edit them privately to change configuration.
+
+For this deployment the DB host matches the website SSH server, and PostgreSQL
+uses port 5432. The helper prints the exact SSH port-forward command. Run it in a
+separate terminal and leave it open. The tunnel forwards local port 55433 to
+127.0.0.1:5432 on that server. SSH uses your normal server authentication and host
+verification. If your SSH username/host differs, pass `--ssh-host user@server`
+to the helper. This profile assumes PostgreSQL is on the SSH server; if it is
+hosted elsewhere, adjust the remote forwarding destination accordingly.
+
+Then start the local backend:
+
+```bash
+venv/bin/python -m scripts.run_preview
+```
+
+The launcher explicitly chooses APP_ENV=preview, loads only whitelisted settings
+from .env.preview.local, and binds to 127.0.0.1:8000 with proxy headers disabled.
+Previously exported test variables are not used for this database selection.
+
+In a second/third terminal, from loker-realty/frontend:
+
+```bash
+npm run start:preview
+```
+
+Open http://localhost:3000/admin and sign in with the LOCAL password selected in
+the helper. The UI labels this as live production data and read-only. /properties
+also reads current production listings. All frontend API URLs are pinned to the
+local backend by this command. Ports 3000 and 3001 are allowed in preview mode.
+Keep the SSH tunnel and backend terminal running. Ctrl+C stops each process.
+
+Protections in this profile:
+
+- PostgreSQL connections start every transaction read-only. Writes are rejected
+  by the database, independently of the UI. Statement timeout is 15 seconds and
+  the connection pool is limited to two connections.
+- Only known read routes and cookie-only admin login/logout are allowed. Writes,
+  webhooks, subscription forms, and the GET unsubscribe endpoint are blocked.
+- Non-loopback clients, foreign hostnames, and non-local browser origins are
+  rejected. Preview is a local development profile, not a production deployment.
+- Email provider credentials are removed from the process. Alert sending, digest,
+  sync, backfill, reconciliation, initialization, and reset entry points reject
+  preview mode. Existing seed commands require test mode and refuse preview.
+- Remote direct database connections require certificate-verified TLS. A direct
+  connection check against the currently configured database failed certificate
+  verification, so SSH tunneling is the supported setup here. Do not disable
+  certificate verification on a public database connection to work around this.
+
+For environments with trusted remote database certificates and direct network
+access, omit --tunnel when creating preview configuration. A dedicated SELECT-only
+PostgreSQL role is an additional option; this implementation does not create or
+modify any production roles, credentials, tables, or records. Transaction read-only
+settings protect the provided runtime, but someone who controls the credentials
+and changes the code could bypass them; do not distribute production DB credentials.
+
+Verification was performed against the disposable test database: SELECT succeeds,
+PostgreSQL rejects DDL in read-only transactions, mutation routes are blocked,
+mail sending is rejected, and normal auth/alert/webhook tests still pass. Tests
+never use production. A separate connection check found the remote certificate
+issue; an automated SSH check could not authenticate noninteractively. The actual
+live-data preview needs your normal SSH authentication in your own terminal.
+
+The admin homepage now reads authenticated GET /api/admin/activity. It returns
+one row per client with processed open/click events, ordered by latest provider
+occurrence time, plus whole-period summary counts. `days=30` is the default;
+`days=7` and `days=0` select the last week and all history. Pagination is bounded
+as with the other admin endpoints. Pending events, delivery-only events, legacy
+counters without event records, and BACKFILL_DRY_RUN logs are excluded. Listing
+clicks are classified using the same URL rules as the existing email timeline.
+The complete client directory remains at frontend /admin/clients. This requires
+no database migration. Restart a local preview backend to load the new read route;
+the existing SSH tunnel can remain open. Tests use only synthetic local records.
+
+### Unsubscribe token repair
+
+New leads receive unique unsubscribe tokens. Saved-search and alert signups repair
+older clients missing a token. Before sending an alert, the worker persists a
+missing token and includes the unsubscribe page URL; it no longer substitutes
+the Contact page. Existing nonempty tokens and subscription preferences are preserved.
+Previously sent emails with Contact links cannot be repaired retroactively.
+
+Optional maintenance from the intended backend environment (no email delivery):
+
+```bash
+venv/bin/python -m scripts.backfill_unsubscribe_tokens          # count only
+venv/bin/python -m scripts.backfill_unsubscribe_tokens --apply  # persist repairs
+```
+
+Preview mode blocks this maintenance command. No database migration is required:
+the token column already exists. Apply/deployment is manual; these commands have
+not been run against production as part of implementation. The current unsubscribe
+endpoint stops future worker selections; an email already in flight may still arrive.

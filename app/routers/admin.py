@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.admin_auth import (COOKIE, COOKIE_PATH, SESSION_SECONDS, auth_config, issue_session,
                             origin_check, rate_limit, require_admin, secure_cookie, verify_password)
 from app.services import admin_reporting
+from app.preview import is_preview
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 reports = APIRouter(dependencies=[Depends(require_admin)])
@@ -62,12 +63,14 @@ async def login(body: Login, request: Request, response: Response):
     response.set_cookie(COOKIE, token, max_age=SESSION_SECONDS, httponly=True,
                         secure=secure_cookie(), samesite="strict", path=COOKIE_PATH)
     response.headers["Cache-Control"] = "no-store"
-    return {"username": username, "csrf_token": session["csrf"], "expires_at": session["expires"]}
+    return {"username": username, "csrf_token": session["csrf"], "expires_at": session["expires"],
+            "data_mode": "production_readonly" if is_preview() else "configured"}
 
 
 @router.get("/session")
 async def session(admin=Depends(require_admin)):
-    return {"username": admin["username"], "csrf_token": admin["csrf"], "expires_at": admin["expires"]}
+    return {"username": admin["username"], "csrf_token": admin["csrf"], "expires_at": admin["expires"],
+            "data_mode": "production_readonly" if is_preview() else "configured"}
 
 
 @router.post("/logout")
@@ -77,6 +80,12 @@ async def logout(request: Request, response: Response, admin=Depends(require_adm
         raise HTTPException(403, "Invalid request token", headers={"Cache-Control": "no-store"})
     response.delete_cookie(COOKIE, path=COOKIE_PATH, secure=secure_cookie(), httponly=True, samesite="strict")
     return {"status": "signed_out"}
+
+
+@reports.get("/activity")
+async def activity(days: int = Query(30, ge=0, le=365), page: int = Query(1, ge=1, le=100000),
+                   page_size: int = Query(25, ge=1, le=100), db=Depends(admin_db)):
+    return await admin_reporting.activity(db, days, page, page_size)
 
 
 @reports.get("/clients")
@@ -98,8 +107,9 @@ async def searches(client_id: int, page: int = Query(1, ge=1, le=100000),
 
 @reports.get("/clients/{client_id}/emails")
 async def emails(client_id: int, page: int = Query(1, ge=1, le=100000),
-                 page_size: int = Query(20, ge=1, le=100), db=Depends(admin_db)):
-    return await admin_reporting.emails(db, client_id, page, page_size)
+                 page_size: int = Query(20, ge=1, le=100), opened_only: bool = False,
+                 days: int = Query(0, ge=0, le=365), db=Depends(admin_db)):
+    return await admin_reporting.emails(db, client_id, page, page_size, opened_only, days)
 
 
 @reports.get("/clients/{client_id}/emails/{email_id}")

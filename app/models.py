@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey, JSON, Date, Text, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
@@ -111,7 +112,7 @@ class Lead(Base):
     # Relationship to searches
     is_unsubscribed = Column(Boolean, default=False)
     unsubscribed_at = Column(DateTime, nullable=True)
-    unsubscribe_token = Column(String, unique=True, index=True, nullable=True)
+    unsubscribe_token = Column(String, unique=True, index=True, nullable=True, default=lambda: str(uuid4()))
     searches = relationship("SavedSearch", back_populates="lead")
 
 class SavedSearch(Base):

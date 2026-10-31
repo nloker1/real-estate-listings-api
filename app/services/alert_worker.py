@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import os
 import asyncio
 import re
@@ -5,8 +6,10 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import joinedload
 from app.models import SavedSearch, Listing, EmailLog, Lead
+from app.services.unsubscribe import ensure_unsubscribe_token
 
 def send_with_resend(params):
+    require_writable_mode()
     if os.getenv("APP_ENV", "").strip().lower() == "test":
         raise RuntimeError("Real email delivery is disabled in test mode")
     import resend
@@ -59,6 +62,7 @@ def naive_utc(value):
 
 async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
                          test_lead_email=None):
+    require_writable_mode()
     test_mode = os.getenv("APP_ENV", "").strip().lower() == "test"
     if test_mode and (session_factory is None or sender is None):
         raise RuntimeError("Test mode requires an explicit database session factory and fake sender")
@@ -97,7 +101,10 @@ async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
             
             current_time = naive_utc(now())
                 
-            unsubscribe_url = f"https://gorgerealty.com/unsubscribe?token={lead.unsubscribe_token}" if lead.unsubscribe_token else "https://gorgerealty.com/contact"
+            if not lead.unsubscribe_token:
+                await ensure_unsubscribe_token(db, lead)
+                await db.commit()
+            unsubscribe_url = f"https://gorgerealty.com/unsubscribe?token={lead.unsubscribe_token}"
 
             # ---------------------------------------------------------
             # 1. PROPERTY ALERT

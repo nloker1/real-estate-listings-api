@@ -1,10 +1,23 @@
 """Create a fictional local admin workspace; refuses non-test environments."""
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import os
 import sys
 
 from scripts.seed_test_data import seed_url, listing_fixtures
+
+
+def preview_listings():
+    listings = listing_fixtures()
+    for row in listings:
+        row.update(list_agent_name="Nate Loker", photo_url="/demo-listing.svg",
+                   lat=45.7276, lon=-121.4865)
+    for index, close_date in ((7, date(2026, 9, 15)), (8, date(2026, 10, 30))):
+        row = dict(listings[0])
+        row.update(id=index, mls_number=f"SYNTHETIC-SOLD-{index}",
+                   address=f"{index} Fictional Test Lane", status="Sold", close_date=close_date)
+        listings.append(row)
+    return listings
 
 
 async def seed(url):
@@ -33,7 +46,9 @@ async def seed(url):
                 {"id": 3, "lead_id": 3, "criteria": {"alert_type": "property", "mls_number": "SYNTHETIC-MATCH"},
                  "is_active": True, "frequency": "instant"},
             ])
-            await connection.execute(insert(Listing), listing_fixtures())
+            # Execute individually: sold rows include close_date, active rows do not.
+            for listing in preview_listings():
+                await connection.execute(insert(Listing), listing)
             await connection.execute(insert(EmailLog), [
                 {"id": 1, "search_id": 1, "listing_id": "SYNTHETIC-MATCH", "user_email": "buyer@example.test",
                  "message_id": "demo-accepted-1", "sent_at": datetime(2026, 1, 3, 12, tzinfo=timezone.utc)},
@@ -53,7 +68,7 @@ async def seed(url):
                         "event_type": kind, "occurred_at": datetime(2026, 1, 3, 12, i, tzinfo=timezone.utc),
                         "details": details, "processing_status": "pending"})
                 await db.commit()
-            for table, last_id in (("leads", 3), ("saved_searches", 3), ("listings", 6), ("email_logs", 2)):
+            for table, last_id in (("leads", 3), ("saved_searches", 3), ("listings", 8), ("email_logs", 2)):
                 await connection.execute(text("SELECT setval(pg_get_serial_sequence(:table_name, 'id'), :last_id, true)"),
                                          {"table_name": f"admin_demo.{table}", "last_id": last_id})
         print("Created admin_demo: 3 fictional clients, saved searches, synthetic emails and events. No emails sent.")

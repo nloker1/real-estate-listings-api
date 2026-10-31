@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import sys
 import os
 import httpx
@@ -35,6 +36,7 @@ def get_media_order(url):
 
 def send_alert_email(subject, body):
     """Send an alert email via Gmail SMTP."""
+    require_writable_mode()
     email_user = os.getenv("EMAIL_USER")
     email_pass = os.getenv("EMAIL_PASSWORD")
     alert_to = os.getenv("ALERT_EMAIL", email_user)
@@ -97,6 +99,7 @@ def normalize_status(std_status):
     return 'Active'
 
 async def sync_rmls_listings():
+    require_writable_mode()
     async with AsyncSessionLocal() as db:
         base_url = "https://resoapi.rmlsweb.com/reso/odata/Property"
         token = os.getenv("RMLS_TOKEN")

@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import os
 import asyncio
 from datetime import datetime
@@ -12,6 +13,7 @@ async def backfill_logs():
     This 'marks as read' existing listings so they won't trigger 
     emails on the first cron run.
     """
+    require_writable_mode()
     print("🚀 Starting DRY RUN (Backfill)...")
     async with AsyncSessionLocal() as db:
         

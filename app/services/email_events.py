@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 """Verified Resend event ingestion and transactional, retry-safe reporting updates."""
 import json
 from datetime import datetime, timezone
@@ -93,6 +94,7 @@ async def reconcile_message(db, message_id):
 
 
 async def record_event(db, values):
+    require_writable_mode()
     inserted = (await db.execute(insert(EmailEvent).values(**values).on_conflict_do_nothing(
         index_elements=[EmailEvent.provider_event_id]
     ).returning(EmailEvent.id))).scalar_one_or_none()
@@ -104,6 +106,7 @@ async def record_event(db, values):
 
 
 async def reconcile_pending(db, limit=100):
+    require_writable_mode()
     message_ids = (await db.execute(select(EmailEvent.message_id).where(
         EmailEvent.processing_status == "pending",
         # Do not let ambiguous associations consume every batch slot forever.

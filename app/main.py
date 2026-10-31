@@ -22,6 +22,7 @@ from app.models import Listing
 from app.routers import alerts
 from app.routers import webhooks
 from app.routers import admin
+from app.preview import is_preview, preview_guard
 
 router = APIRouter()
 
@@ -42,7 +43,7 @@ app.add_middleware(
         "https://www.lokerrealty.com",
         "https://gorgerealty.com",      # <--- New
         "https://www.gorgerealty.com"   # <--- New
-    ],
+    ] + (["http://localhost:3001", "http://127.0.0.1:3001"] if is_preview() else []),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,6 +53,7 @@ app.include_router(alerts.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
 app.middleware("http")(admin.private_headers)
+app.middleware("http")(preview_guard)
 
 ZIP_MAP = {
     "hood-river": ["97031"],
@@ -607,6 +609,9 @@ async def create_saved_search(request: schemas.AlertRequest, db: AsyncSession = 
         db.add(db_lead)
         # We flush so the db_lead gets an ID, which we need for the SavedSearch foreign key
         await db.flush()
+
+    from app.services.unsubscribe import ensure_unsubscribe_token
+    await ensure_unsubscribe_token(db, db_lead)
 
     # 2. Create the Saved Search
     # We store the criteria exactly as sent from the FilterBar.js buildFilters()

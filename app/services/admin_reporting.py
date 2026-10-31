@@ -1,5 +1,5 @@
 """Private reporting from verified events, separate from legacy tracking totals."""
-from datetime import timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit, unquote
 
 from fastapi import HTTPException
@@ -76,6 +76,55 @@ async def clients(db, q, page, page_size):
                             .offset((page - 1) * page_size).limit(page_size))).scalars().all()
     stats = await summaries(db, [lead.id for lead in leads])
     return page_result([{**client_fields(lead), **stats[lead.id]} for lead in leads], total, page, page_size)
+
+
+async def activity(db, days, page, page_size):
+    """One row per engaged client, ordered by latest verified provider activity."""
+    now = datetime.now(timezone.utc)
+    query = select(SavedSearch.lead_id.label('client_id'), EmailLog.id.label('email_id'),
+                   EmailLog.listing_id, EmailEvent.id.label('event_id'), EmailEvent.event_type,
+                   EmailEvent.occurred_at, EmailEvent.details).join(
+                       EmailLog, EmailLog.search_id == SavedSearch.id).join(
+                       EmailEvent, EmailEvent.email_log_id == EmailLog.id).where(
+                           real_log(), EmailEvent.processing_status == 'processed',
+                           EmailEvent.event_type.in_(['email.opened', 'email.clicked']),
+                           EmailEvent.occurred_at <= now)
+    if days:
+        query = query.where(EmailEvent.occurred_at >= now - timedelta(days=days))
+    eligible = query.subquery()
+    grouped = select(eligible.c.client_id,
+        func.max(eligible.c.occurred_at).label('last_activity_at'),
+        func.sum(case((eligible.c.event_type == 'email.opened', 1), else_=0)).label('opens'),
+        func.sum(case((eligible.c.event_type == 'email.clicked', 1), else_=0)).label('clicks'),
+    ).group_by(eligible.c.client_id).subquery()
+    # Joining Lead excludes orphaned searches from both summary and page totals.
+    visible = select(grouped).join(Lead, Lead.id == grouped.c.client_id).subquery()
+    totals = (await db.execute(select(func.count(), func.coalesce(func.sum(visible.c.opens), 0),
+        func.coalesce(func.sum(visible.c.clicks), 0)).select_from(visible))).one()
+    rows = (await db.execute(select(Lead, visible.c.last_activity_at, visible.c.opens, visible.c.clicks)
+        .join(visible, visible.c.client_id == Lead.id)
+        .order_by(visible.c.last_activity_at.desc(), Lead.id.desc())
+        .offset((page - 1) * page_size).limit(page_size))).all()
+    ids = [lead.id for lead, *_ in rows]
+    latest = {}
+    if ids:
+        ranked = select(eligible, func.row_number().over(partition_by=eligible.c.client_id,
+            order_by=(eligible.c.occurred_at.desc(), eligible.c.event_id.desc())).label('rank'))
+        ranked = ranked.where(eligible.c.client_id.in_(ids)).subquery()
+        latest_rows = await db.execute(select(ranked, Listing.address.label('listing_address'))
+            .outerjoin(Listing, Listing.mls_number == ranked.c.listing_id).where(ranked.c.rank == 1))
+        latest = {row.client_id: row for row in latest_rows}
+    items = []
+    for lead, last, opens, clicks in rows:
+        event = latest[lead.id]
+        kind = ('email_open' if event.event_type == 'email.opened' else 'listing_click'
+                if listing_click(event.details.get('link'), event.listing_id) else 'link_click')
+        items.append({**client_fields(lead), 'last_activity_at': utc(last),
+                      'recorded_open_count': opens, 'recorded_click_count': clicks,
+                      'last_activity_kind': kind, 'last_email_id': event.email_id,
+                      'listing_id': event.listing_id, 'listing_address': event.listing_address})
+    return {**page_result(items, totals[0], page, page_size), 'days': days,
+            'summary': {'active_clients': totals[0], 'recorded_opens': totals[1], 'recorded_clicks': totals[2]}}
 
 
 async def client(db, client_id):
@@ -157,13 +206,34 @@ async def email_rows(db, logs):
             for row in logs]
 
 
-async def emails(db, client_id, page, page_size):
+async def emails(db, client_id, page, page_size, opened_only=False, days=0):
     await require_client(db, client_id)
     query = select(EmailLog).join(SavedSearch).where(SavedSearch.lead_id == client_id, real_log())
+    opened = None
+    if opened_only:
+        now = datetime.now(timezone.utc)
+        events = select(EmailEvent.email_log_id.label('log_id'),
+                        func.count(EmailEvent.id).label('opens'),
+                        func.max(EmailEvent.occurred_at).label('last_open_at')).where(
+            EmailEvent.processing_status == 'processed', EmailEvent.event_type == 'email.opened',
+            EmailEvent.occurred_at <= now)
+        if days:
+            events = events.where(EmailEvent.occurred_at >= now - timedelta(days=days))
+        opened = events.group_by(EmailEvent.email_log_id).subquery()
+        query = query.join(opened, opened.c.log_id == EmailLog.id)
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
-    logs = (await db.execute(query.order_by(EmailLog.sent_at.desc(), EmailLog.id.desc())
-                           .offset((page - 1) * page_size).limit(page_size))).scalars().all()
-    return page_result(await email_rows(db, logs), total, page, page_size)
+    order = (opened.c.last_open_at.desc(), EmailLog.id.desc()) if opened_only else (EmailLog.sent_at.desc(), EmailLog.id.desc())
+    if opened_only:
+        rows = (await db.execute(query.add_columns(opened.c.opens, opened.c.last_open_at)
+            .order_by(*order).offset((page - 1) * page_size).limit(page_size))).all()
+        items = await email_rows(db, [row[0] for row in rows])
+        for item, (_, opens, last_open) in zip(items, rows):
+            item.update(period_open_count=opens, last_recorded_open_at=utc(last_open))
+    else:
+        logs = (await db.execute(query.order_by(*order)
+            .offset((page - 1) * page_size).limit(page_size))).scalars().all()
+        items = await email_rows(db, logs)
+    return page_result(items, total, page, page_size)
 
 
 async def email(db, client_id, email_id):

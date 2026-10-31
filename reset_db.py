@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import asyncio
 import sys
 import os
@@ -9,6 +10,7 @@ from app.database import engine, Base
 from app.models import Listing
 
 async def reset_database():
+    require_writable_mode()
     async with engine.begin() as conn:
         print("Dropping all tables...")
         # run_sync is required to bridge async engine to sync metadata methods

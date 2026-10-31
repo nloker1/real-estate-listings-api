@@ -4,6 +4,8 @@ from sqlalchemy.future import select
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 import uuid
+from datetime import datetime
+from app.services.unsubscribe import ensure_unsubscribe_token
 
 from app.database import get_db
 from app.models import Lead, SavedSearch, Listing
@@ -45,6 +47,9 @@ async def subscribe_to_alert(req: SubscribeRequest, db: AsyncSession = Depends(g
             if not lead.unsubscribe_token:
                 lead.unsubscribe_token = str(uuid.uuid4())
             await db.commit()
+
+    await ensure_unsubscribe_token(db, lead)
+    await db.commit()
 
     # 2. Build the criteria JSON based on alert_type
     if req.alert_type == "property":
@@ -101,7 +106,8 @@ async def unsubscribe_lead(token: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invalid unsubscribe token")
 
     lead.is_unsubscribed = True
-    lead.unsubscribed_at = __import__('datetime').datetime.utcnow()
+    if lead.unsubscribed_at is None:
+        lead.unsubscribed_at = datetime.utcnow()
     
     await db.commit()
     

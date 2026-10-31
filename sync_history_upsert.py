@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import sys
 import os
 import httpx
@@ -148,6 +149,7 @@ async def save_batch(listings, db):
     print(f"   💾 Batch Saved: {count_new} New | {count_updated} Updated")
 
 async def run_history_sync():
+    require_writable_mode()
     async with AsyncSessionLocal() as db:
         base_url = "https://resoapi.rmlsweb.com/reso/odata/Property"
         token = os.getenv("RMLS_TOKEN")

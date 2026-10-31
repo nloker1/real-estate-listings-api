@@ -1,3 +1,4 @@
+from app.preview import require_writable_mode
 import sys
 import os
 import httpx
@@ -50,6 +51,7 @@ def normalize_status(std_status):
     return 'Active'
 
 async def fetch_one_off_listings(mls_numbers):
+    require_writable_mode()
     async with AsyncSessionLocal() as db:
         base_url = "https://resoapi.rmlsweb.com/reso/odata/Property"
         token = os.getenv("RMLS_TOKEN")

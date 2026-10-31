@@ -53,7 +53,7 @@ async def sign_in(client):
 class AdminAuthTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_reports_reject_anonymous_requests_before_database_access(self):
         async with admin_client() as (client, db):
-            for path in ("/clients", "/clients/1", "/clients/1/searches", "/clients/1/emails",
+            for path in ("/activity", "/clients", "/clients/1", "/clients/1/searches", "/clients/1/emails",
                          "/clients/1/emails/1", "/clients/1/emails/1/events"):
                 response = await client.get("/api/admin" + path)
                 self.assertEqual(response.status_code, 401)
@@ -196,3 +196,73 @@ class AdminReportingTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(row["is_unsubscribed"])
                 self.assertEqual((row["email_count"], row["active_search_count"]), (0, 0))
                 self.assertEqual((await client.get("/api/admin/clients/2/emails")).json()["items"], [])
+
+    async def test_activity_dashboard_orders_clients_and_filters_verified_events(self):
+        from datetime import timedelta
+        from sqlalchemy import insert
+        from app.models import Lead, SavedSearch, EmailLog
+        from app.services.email_events import record_event
+        now = datetime.now(timezone.utc)
+        async with alert_database() as (connection, sessions):
+            await connection.execute(insert(Lead), [
+                {'id': 2, 'email': 'recent@example.test', 'name': 'Recent Buyer', 'is_unsubscribed': True},
+                {'id': 3, 'email': 'quiet@example.test', 'name': 'Quiet Buyer', 'is_unsubscribed': False},
+                {'id': 4, 'email': 'older@example.test', 'name': 'Older Buyer', 'is_unsubscribed': False},
+            ])
+            await connection.execute(insert(SavedSearch), [
+                {'id': i, 'lead_id': i, 'criteria': {}, 'is_active': True} for i in (2, 3, 4)
+            ])
+            async with sessions() as db:
+                logs = [EmailLog(search_id=i, listing_id='SYNTHETIC-MATCH',
+                                 message_id=f'activity-{i}', user_email='synthetic@example.test',
+                                 open_count=100 if i == 3 else 0) for i in (1, 2, 3, 4)]
+                logs.append(EmailLog(search_id=1, listing_id='BASELINE', message_id='BACKFILL_DRY_RUN'))
+                db.add_all(logs)
+                await db.commit()
+                cases = [
+                    ('activity-1', 'email.opened', now - timedelta(days=2), {}),
+                    ('activity-1', 'email.clicked', now - timedelta(hours=3), {'link': 'https://gorgerealty.com/unsubscribe?token=synthetic'}),
+                    ('activity-1', 'email.clicked', now - timedelta(hours=2), {'link': 'https://gorgerealty.com/property/test/SYNTHETIC-MATCH'}),
+                    ('activity-2', 'email.opened', now - timedelta(hours=1), {}),
+                    ('activity-3', 'email.delivered', now - timedelta(minutes=5), {}),
+                    ('activity-4', 'email.opened', now - timedelta(days=90), {}),
+                    ('BACKFILL_DRY_RUN', 'email.opened', now - timedelta(minutes=1), {}),
+                    ('unassociated', 'email.opened', now - timedelta(minutes=1), {}),
+                ]
+                for index, (message, kind, occurred, details) in enumerate(cases):
+                    event = {'provider_event_id': f'activity-event-{index}', 'message_id': message,
+                             'event_type': kind, 'occurred_at': occurred, 'details': details,
+                             'processing_status': 'pending'}
+                    await record_event(db, event)
+                    await record_event(db, event)
+                await db.commit()
+            async with admin_client(sessions) as (client, _):
+                await sign_in(client)
+                response = await client.get('/api/admin/activity')
+                self.assertEqual(response.status_code, 200, response.text)
+                data = response.json()
+                self.assertEqual([row['id'] for row in data['items']], [2, 1])
+                self.assertEqual(data['summary'], {'active_clients': 2, 'recorded_opens': 2, 'recorded_clicks': 2})
+                self.assertTrue(data['items'][0]['is_unsubscribed'])
+                self.assertEqual(data['items'][0]['last_activity_kind'], 'email_open')
+                self.assertEqual(data['items'][1]['last_activity_kind'], 'listing_click')
+                self.assertEqual(data['items'][1]['last_email_id'], logs[0].id)
+                self.assertEqual(data['items'][1]['listing_address'], '1 Fictional Test Lane')
+                opened = (await client.get('/api/admin/clients/1/emails?opened_only=true&days=30')).json()
+                self.assertEqual(opened['total'], 1)
+                self.assertEqual(opened['items'][0]['id'], logs[0].id)
+                self.assertEqual(opened['items'][0]['period_open_count'], 1)
+                self.assertIsNotNone(opened['items'][0]['last_recorded_open_at'])
+                self.assertEqual((await client.get('/api/admin/clients/1/emails?opened_only=true&days=1')).json()['total'], 0)
+                self.assertEqual((await client.get('/api/admin/clients/4/emails?opened_only=true&days=30')).json()['total'], 0)
+                self.assertEqual((await client.get('/api/admin/clients/4/emails?opened_only=true&days=0')).json()['total'], 1)
+                all_time = (await client.get('/api/admin/activity?days=0')).json()
+                self.assertEqual([row['id'] for row in all_time['items']], [2, 1, 4])
+                self.assertEqual((await client.get('/api/admin/activity?days=1')).json()['summary']['recorded_opens'], 1)
+                one_page = (await client.get('/api/admin/activity?page_size=1')).json()
+                self.assertEqual((one_page['total'], one_page['pages']), (2, 2))
+                self.assertEqual(one_page['summary']['recorded_clicks'], 2)
+                self.assertEqual((await client.get('/api/admin/activity?page_size=1&page=2')).json()['items'][0]['id'], 1)
+                self.assertEqual((await client.get('/api/admin/activity?days=-1')).status_code, 422)
+                self.assertEqual((await client.get('/api/admin/activity?days=366')).status_code, 422)
+                self.assertEqual(response.headers['cache-control'], 'no-store')
