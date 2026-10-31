@@ -1,5 +1,5 @@
 # Standard Library
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import datetime, timedelta
 
 # FastAPI
@@ -183,7 +183,8 @@ async def get_listings(
     max_sqft: Optional[int] = None,
     min_acres: Optional[float] = None,
     max_acres: Optional[float] = None,
-    property_type: Optional[str] = None
+    property_type: Optional[str] = None,
+    sort: Optional[Literal["sold_date_desc"]] = None
 ):
     # Start building the query
     # We ADDED: status, beds, baths, sqft, zipcode so the map popup can show them
@@ -191,6 +192,7 @@ async def get_listings(
         Listing.mls_number,
         Listing.price,
         Listing.status,         # <--- Added
+        Listing.close_date,
         Listing.lat,
         Listing.lon,
         Listing.address,
@@ -269,6 +271,9 @@ async def get_listings(
             )
         else:
             query = query.where(Listing.property_type == property_type)
+
+    if sort == "sold_date_desc":
+        query = query.order_by(Listing.close_date.desc().nullslast(), Listing.mls_number.asc())
 
     # Limit results (Sold data can be huge, so 500 is a safe limit for now)
     query = query.limit(500)
