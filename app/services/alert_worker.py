@@ -269,44 +269,12 @@ async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
             # 3. LEGACY MAP SEARCH ALERT
             # ---------------------------------------------------------
             else:
-                query = select(Listing).where(Listing.is_published == True)
-                query = query.where(Listing.status == 'Active')
-                query = query.where(Listing.created_at > naive_utc(search.created_at))
+                from app.services.search_matching import listing_matches
+                query = listing_matches(criteria).where(Listing.created_at > naive_utc(search.created_at))
                 query = query.where(~select(EmailLog.id).where(
                     EmailLog.search_id == search.id,
                     EmailLog.listing_id == Listing.mls_number,
                 ).exists())
-                
-                if criteria.get('minPrice'):
-                    query = query.where(Listing.price >= int(criteria['minPrice']))
-                if criteria.get('maxPrice'):
-                    query = query.where(Listing.price <= int(criteria['maxPrice']))
-                if criteria.get('minBeds'):
-                    query = query.where(Listing.beds >= int(criteria['minBeds']))
-                if criteria.get('minBaths'):
-                    query = query.where(Listing.baths >= float(criteria['minBaths']))
-                if criteria.get('propertyType'):
-                    query = query.where(Listing.property_type == criteria['propertyType'])
-
-                # --- ADDED FILTERS BELOW ---
-                if criteria.get('minSqft'):
-                    query = query.where(Listing.sqft >= int(criteria['minSqft']))
-                if criteria.get('maxSqft'):
-                    query = query.where(Listing.sqft <= int(criteria['maxSqft']))
-                if criteria.get('minAcres'):
-                    query = query.where(Listing.acreage >= float(criteria['minAcres']))
-                if criteria.get('maxAcres'):
-                    query = query.where(Listing.acreage <= float(criteria['maxAcres']))
-                # ---------------------------
-                
-                if criteria.get('cities'):
-                    city_filters = []
-                    for c in criteria['cities']:
-                        city_filters.append(Listing.city.ilike(f"%{c}%"))
-                        no_spaces = c.replace(' ', '')
-                        city_filters.append(Listing.city.ilike(f"%{no_spaces}%"))
-                        city_filters.append(func.replace(Listing.city, ' ', '').ilike(f"%{no_spaces}%"))
-                    query = query.where(or_(*city_filters))
 
                 match_result = await db.execute(query)
                 new_listings = match_result.scalars().all()

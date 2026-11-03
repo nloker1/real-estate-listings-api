@@ -201,11 +201,11 @@ and storage failure followed by a successful retry.
 
 ### Private client activity workspace
 
-The React frontend now has `/admin`, backed by `/api/admin` in FastAPI. This first
-version is read-only and uses a single owner account configured on the server.
+The React frontend has `/admin`, backed by `/api/admin` in FastAPI. It
+reports activity and manages listing searches using a single owner account configured on the server.
 It includes a searchable/paginated client directory, saved search criteria and
-settings, paginated email history, and paginated event timelines. No client
-editing, password reset, multi-user roles, or email sending is exposed here.
+settings, paginated email history, and paginated event timelines. Client creation is available; client
+editing, password reset, multi-user roles, and email sending are not exposed here.
 
 Reporting joins emails to clients through SavedSearch.lead_id (not an email-string
 match). It excludes BACKFILL_DRY_RUN logs from email totals. Recorded open/click
@@ -412,3 +412,46 @@ Preview mode blocks this maintenance command. No database migration is required:
 the token column already exists. Apply/deployment is manual; these commands have
 not been run against production as part of implementation. The current unsubscribe
 endpoint stops future worker selections; an email already in flight may still arrive.
+
+### Admin listing-search editor
+
+Open `/admin/clients`, choose a client, then **New listing search** or **Edit criteria**.
+Preview current matching homes before saving. Cities, price, beds, baths, property
+type (exact listing value), square footage and acreage use the same query filters
+as the alert worker. Matches are paginated, active and published only. City matching
+retains the worker's existing substring and space-normalization behavior.
+
+New searches use instant alerts and start paused. Editing criteria also pauses a
+search. Use **Activate search** after review; **Pause search** stops future worker
+selections, though mail already in flight may still arrive. Creating, editing,
+previewing or activating a search does not itself send email. Activation makes it
+eligible on the next scheduled worker run. Client unsubscribe settings are preserved;
+activation is refused for unsubscribed clients. Existing search creation times and
+send history are retained, so editing does not reset which listings were already sent.
+A new search alerts only on listings ingested after its creation; previewing the
+current inventory does not enqueue an initial inventory email.
+
+Property watches, market reports, non-instant searches, or records containing
+unsupported criteria cannot be edited/activated through this listing editor; they
+can still be paused. This avoids silently dropping existing settings. Client editing
+and RealScout import are separate future work. No schema migration is required.
+
+All editor/preview endpoints require the admin session, an allowed Origin and
+session CSRF token. Live-data preview allows only the read-only matching query;
+create/update/activation remain blocked at the router and preview middleware.
+Use the fictional `admin_demo` workspace to exercise saving locally. No production
+changes or email sends are performed automatically by deployment of this feature.
+
+### Add a client
+
+Use **Admin → All clients → Add client**. Enter a name and email; after creation,
+the client profile opens so a paused listing search can be added. Creation does
+not send an invitation, create a search, or trigger an alert. Email addresses are
+stored lowercase; duplicates (including older mixed-case or padded emails) are
+rejected without modifying existing client data or unsubscribe preferences.
+New clients receive an unsubscribe token through the existing model default.
+
+The write requires an admin session, trusted Origin and session CSRF token.
+Live production-data preview shows the form but disables saving, and server-side
+protections also block it. Use the fictional local admin demo for write testing.
+No database migration is needed.

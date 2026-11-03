@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func, case, or_
 
 from app.models import Lead, SavedSearch, EmailLog, EmailEvent, Listing
+from app.services.search_matching import editable_search
 
 
 def utc(value):
@@ -154,7 +155,7 @@ async def searches(db, client_id, page, page_size):
         return output
     return page_result([{"id": row.id, "is_active": bool(row.is_active), "frequency": row.frequency,
                          "created_at": utc(row.created_at), "last_alert_sent": utc(row.last_alert_sent),
-                         "criteria": visible_criteria(row.criteria)}
+                         "editable": editable_search(row), "criteria": visible_criteria(row.criteria)}
                         for row in rows], total, page, page_size)
 
 

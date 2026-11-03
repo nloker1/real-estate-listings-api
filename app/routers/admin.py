@@ -1,13 +1,15 @@
-"""Authenticated, read-only activity reporting. Never returns unsubscribe tokens."""
+"""Authenticated client reporting and saved-search management."""
 import hmac
 import os
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from sqlalchemy import select, func
+from app.models import Lead
 
 from app.admin_auth import (COOKIE, COOKIE_PATH, SESSION_SECONDS, auth_config, issue_session,
                             origin_check, rate_limit, require_admin, secure_cookie, verify_password)
@@ -124,3 +126,39 @@ async def events(client_id: int, email_id: int, page: int = Query(1, ge=1, le=10
 
 
 router.include_router(reports)
+
+from app.routers.admin_searches import router as searches_router, configure_routes
+configure_routes(admin_db)
+router.include_router(searches_router)
+
+# Use the same origin, CSRF and preview protections as saved-search writes.
+from app.routers.admin_searches import writable
+
+
+class NewClient(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=200)
+    email: EmailStr = Field(max_length=254)
+
+    @field_validator('email')
+    @classmethod
+    def normalized_email(cls, value):
+        return str(value).lower()
+
+
+@router.post('/clients', status_code=201, dependencies=[Depends(writable)])
+async def add_client(body: NewClient, db=Depends(admin_db)):
+    # Older signup paths did not normalize email case or surrounding whitespace.
+    existing = (await db.execute(select(Lead.id).where(
+        func.lower(func.trim(Lead.email)) == body.email).limit(1))).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(409, 'A client with this email already exists. Find them in the client directory.')
+    lead = Lead(name=body.name, email=body.email, is_unsubscribed=False)
+    db.add(lead)
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The unique email constraint also protects simultaneous submissions.
+        await db.rollback()
+        raise HTTPException(409, 'This client could not be added because a record already exists. Refresh the client directory.') from None
+    return {'id': lead.id, 'name': lead.name, 'email': lead.email}

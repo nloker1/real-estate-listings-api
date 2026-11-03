@@ -1,5 +1,6 @@
 """Explicit local preview of live data. No implicit production configuration fallback."""
 import ipaddress
+import re
 import os
 from pathlib import Path
 
@@ -74,8 +75,10 @@ async def preview_guard(request, call_next):
     read_path = path in {'/api/health', '/api/listings', '/api/admin/session', '/api/admin/activity', '/map', '/docs',
                         '/redoc', '/openapi.json', '/docs/oauth2-redirect'} or path.startswith(
                             ('/api/listings/', '/api/market/', '/api/admin/clients', '/p/', '/static/'))
+    preview_query = re.fullmatch(r'/api/admin/clients/[0-9]+/search-preview', path) is not None
     allowed = (request.method == 'OPTIONS' or (request.method in {'GET', 'HEAD'} and read_path)
-               or (request.method == 'POST' and path in {'/api/admin/login', '/api/admin/logout'}))
+               or (request.method == 'POST' and
+                   (path in {'/api/admin/login', '/api/admin/logout'} or preview_query)))
     if not allowed:
         return JSONResponse({'detail': 'Read-only preview: this action is disabled'}, status_code=403,
                             headers={'Cache-Control': 'no-store'})

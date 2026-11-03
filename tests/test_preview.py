@@ -86,12 +86,14 @@ class PreviewHttpTests(unittest.IsolatedAsyncioTestCase):
             async with AsyncClient(transport=ASGITransport(app=app),base_url='http://localhost:8000',
                                    headers={'Origin':'http://localhost:3001'}) as client:
                 for method,path in [('POST','/api/saved-searches'),('POST','/api/v1/webhooks/resend'),
-                                    ('GET','/api/alerts/unsubscribe?token=synthetic'),('DELETE','/api/admin/clients/1')]:
+                                    ('GET','/api/alerts/unsubscribe?token=synthetic'),('DELETE','/api/admin/clients/1'),
+                                    ('POST','/api/admin/clients/1/searches'),('POST','/api/admin/clients/1/search-preview/extra')]:
                     self.assertEqual((await client.request(method,path)).status_code,403)
                 called.assert_not_called()
                 self.assertEqual((await client.get('/api/listings')).status_code,200)
                 self.assertEqual((await client.get('/api/admin/activity')).status_code,200)
                 self.assertEqual((await client.post('/api/admin/login')).status_code,200)
+                self.assertEqual((await client.post('/api/admin/clients/1/search-preview')).status_code,200)
                 response=await client.get('/api/admin/session')
                 self.assertEqual(response.headers['x-data-mode'],'production-readonly-preview')
                 self.assertEqual((await client.get('/api/listings',headers={'Origin':'https://untrusted.example'})).status_code,403)

@@ -23,6 +23,8 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=False,  # Set to True for SQL debug logs
     future=True,
+    # Replace stale idle connections before handing them to a request.
+    pool_pre_ping=True,
     connect_args=connection_options(DATABASE_URL) if is_preview() else {},
     **({"pool_size": 2, "max_overflow": 0} if is_preview() else {}),
 )
