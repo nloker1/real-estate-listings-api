@@ -5,7 +5,7 @@ from urllib.parse import urlsplit, unquote
 from fastapi import HTTPException
 from sqlalchemy import select, func, case, or_
 
-from app.models import Lead, SavedSearch, EmailLog, EmailEvent, Listing
+from app.models import Lead, SavedSearch, EmailLog, EmailEvent, Listing, EmailLogListing
 from app.services.search_matching import editable_search
 
 
@@ -115,15 +115,25 @@ async def activity(db, days, page, page_size):
         latest_rows = await db.execute(select(ranked, Listing.address.label('listing_address'))
             .outerjoin(Listing, Listing.mls_number == ranked.c.listing_id).where(ranked.c.rank == 1))
         latest = {row.client_id: row for row in latest_rows}
+    digest_members = {}
+    if latest:
+        for email_id, mls, address in await db.execute(select(
+                EmailLogListing.email_log_id, EmailLogListing.listing_id, Listing.address)
+                .outerjoin(Listing, Listing.mls_number == EmailLogListing.listing_id)
+                .where(EmailLogListing.email_log_id.in_([event.email_id for event in latest.values()]))):
+            digest_members.setdefault(email_id, {})[mls] = address
     items = []
     for lead, last, opens, clicks in rows:
         event = latest[lead.id]
+        members = digest_members.get(event.email_id, {})
+        clicked_mls = next((mls for mls in members
+            if listing_click(event.details.get('link'), mls)), None)
         kind = ('email_open' if event.event_type == 'email.opened' else 'listing_click'
-                if listing_click(event.details.get('link'), event.listing_id) else 'link_click')
+                if clicked_mls or listing_click(event.details.get('link'), event.listing_id) else 'link_click')
         items.append({**client_fields(lead), 'last_activity_at': utc(last),
                       'recorded_open_count': opens, 'recorded_click_count': clicks,
                       'last_activity_kind': kind, 'last_email_id': event.email_id,
-                      'listing_id': event.listing_id, 'listing_address': event.listing_address})
+                      'listing_id': clicked_mls or event.listing_id, 'listing_address': (members[clicked_mls] if clicked_mls else (f'{len(members)} homes in your digest' if members else event.listing_address))})
     return {**page_result(items, totals[0], page, page_size), 'days': days,
             'summary': {'active_clients': totals[0], 'recorded_opens': totals[1], 'recorded_clicks': totals[2]}}
 
@@ -198,8 +208,16 @@ async def email_rows(db, logs):
     listings = (await db.execute(select(Listing.mls_number, Listing.address).where(
         Listing.mls_number.in_([row.listing_id for row in logs])))).all()
     addresses = dict(listings)
+    digest_listings = {}
+    for log_id, mls, address in await db.execute(select(
+            EmailLogListing.email_log_id, EmailLogListing.listing_id, Listing.address)
+            .outerjoin(Listing, Listing.mls_number == EmailLogListing.listing_id)
+            .where(EmailLogListing.email_log_id.in_(ids)).order_by(EmailLogListing.listing_id)):
+        digest_listings.setdefault(log_id, []).append({"listing_id": mls, "address": address})
     return [{"id": row.id, "search_id": row.search_id, "listing_id": row.listing_id,
-             "listing_address": addresses.get(row.listing_id), "recipient": row.user_email,
+             "listing_address": (f"{len(digest_listings[row.id])} homes in your digest"
+                                 if row.id in digest_listings else addresses.get(row.listing_id)),
+             "included_listings": digest_listings.get(row.id, []), "recipient": row.user_email,
              "accepted_at": utc(row.sent_at), "provider_message_id": row.message_id,
              "legacy_open_count": row.open_count or 0, "legacy_click_count": row.click_count or 0,
              **{**stats[row.id], "delivery_status": stats[row.id]["delivery_status"] or
@@ -254,6 +272,9 @@ def listing_click(link, listing_id):
 
 async def events(db, client_id, email_id, page, page_size):
     log = await log_for_client(db, client_id, email_id)
+    included_ids = set((await db.execute(select(EmailLogListing.listing_id).where(
+        EmailLogListing.email_log_id == log.id))).scalars().all())
+    included_ids.add(log.listing_id)
     query = select(EmailEvent).where(EmailEvent.email_log_id == log.id, EmailEvent.processing_status == "processed")
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
     rows = (await db.execute(query.order_by(EmailEvent.occurred_at.desc(), EmailEvent.id.desc())
@@ -261,6 +282,6 @@ async def events(db, client_id, email_id, page, page_size):
     return page_result([{"id": row.id, "event_type": row.event_type,
                          "occurred_at": utc(row.occurred_at), "received_at": utc(row.received_at),
                          "clicked_url": row.details.get("link") if row.event_type == "email.clicked" else None,
-                         "is_listing_click": row.event_type == "email.clicked" and listing_click(row.details.get("link"), log.listing_id),
+                         "is_listing_click": row.event_type == "email.clicked" and any(listing_click(row.details.get("link"), mls) for mls in included_ids),
                          "engagement_source": "unclassified" if row.event_type in {"email.opened", "email.clicked"} else None}
                         for row in rows], total, page, page_size)

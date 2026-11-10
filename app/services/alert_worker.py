@@ -2,11 +2,11 @@ from app.preview import require_writable_mode
 from zoneinfo import ZoneInfo
 import os
 import asyncio
-import re
+from app.services.alert_email import create_slug, digest_content
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import joinedload
-from app.models import SavedSearch, Listing, EmailLog, Lead
+from app.models import SavedSearch, Listing, EmailLog, Lead, EmailLogListing
 from app.services.unsubscribe import ensure_unsubscribe_token
 
 def send_with_resend(params):
@@ -17,19 +17,8 @@ def send_with_resend(params):
     resend.api_key = os.getenv("RESEND_API_KEY")
     return resend.Emails.send(params)
 
-def create_slug(address):
-    """Simple Python version of the frontend slugify logic."""
-    if not address:
-        return "property"
-    # Match frontend: lowercase, spaces to hyphens, remove non-alphanumeric
-    slug = address.lower().strip()
-    slug = re.sub(r'\s+', '-', slug)
-    slug = re.sub(r'[^\w\-]+', '', slug)
-    slug = re.sub(r'\-\-+', '-', slug)
-    return slug
-
 async def send_resend_email(to_email, subject, html_content, db, search, listing_id_str,
-                            *, sender, now, delay, criteria_on_success=None):
+                            *, sender, now, delay, criteria_on_success=None, listing_ids=None):
     params = {
         "from": "Gorge Realty Alerts <alerts@gorgerealty.com>",
         "to": [to_email], "subject": subject, "html": html_content,
@@ -45,8 +34,14 @@ async def send_resend_email(to_email, subject, html_content, db, search, listing
         print(f"No message ID for search {search.id}; retry on next run.")
         await asyncio.sleep(delay)
         return False
-    db.add(EmailLog(search_id=search.id, listing_id=listing_id_str,
-                    user_email=to_email, message_id=response["id"]))
+    log = EmailLog(search_id=search.id, listing_id=listing_id_str,
+                   user_email=to_email, message_id=response["id"],
+                   sent_at=naive_utc(now()).replace(tzinfo=timezone.utc))
+    db.add(log)
+    if listing_ids:
+        await db.flush()
+        db.add_all([EmailLogListing(email_log_id=log.id, listing_id=mls)
+                    for mls in listing_ids])
     search.last_alert_sent = naive_utc(now())
     if criteria_on_success is not None:
         search.criteria = criteria_on_success
@@ -54,6 +49,7 @@ async def send_resend_email(to_email, subject, html_content, db, search, listing
     await db.commit()
     await asyncio.sleep(delay)
     return True
+
 
 
 def naive_utc(value):
@@ -306,10 +302,22 @@ async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
                     EmailLog.listing_id == Listing.mls_number,
                 ).exists())
 
+                query = query.where(~select(EmailLogListing.email_log_id).join(
+                    EmailLog, EmailLog.id == EmailLogListing.email_log_id).where(
+                    EmailLog.search_id == search.id,
+                    EmailLogListing.listing_id == Listing.mls_number,
+                ).exists()).order_by(Listing.created_at, Listing.mls_number)
                 match_result = await db.execute(query)
                 new_listings = match_result.scalars().all()
 
                 if not new_listings:
+                    continue
+
+                if search.frequency in {"weekly", "monthly"}:
+                    subject, html_content = digest_content(new_listings, search.frequency, unsubscribe_url)
+                    await send_resend_email(lead.email, subject, html_content, db, search,
+                        f"digest-{search.frequency}", sender=sender, now=now, delay=delay,
+                        listing_ids=[str(listing.mls_number) for listing in new_listings])
                     continue
 
                 for listing in new_listings:

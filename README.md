@@ -580,7 +580,8 @@ The listing worker supports instant, daily, weekly, and monthly frequencies. Ins
 every worker run. Daily is due at 08:00 America/Los_Angeles; monthly is due on
 the first at 08:00 in that zone. Weekly alerts are due Mondays at 08:00 Pacific. Delivery happens on the next worker run, including
 after downtime. Searches created after a boundary wait for the next boundary.
-No matches means no email. Emails remain one per listing, not a digest.
+No matches means no email. Instant and daily emails remain one per listing.
+Weekly and monthly searches send one digest containing all eligible unsent listings.
 A failed batch keeps its prior scheduling timestamp so failed matches retry on
 the next run; committed success logs exclude already sent listings.
 Unknown frequencies are skipped. Property watches and market alerts retain
@@ -590,3 +591,35 @@ Imported searches with review metadata remain blocked from activation pending
 explicit review. This change does not remove that safeguard.
 Concurrent jobs and a crash between provider acceptance and DB commit still
 require durable delivery claims/idempotency; run only one worker at a time.
+
+
+### Deploying weekly/monthly listing digests
+
+Apply migrations/004_email_log_listings.sql before deploying the updated backend.
+This additive table needs no backfill for existing single-listing delivery logs.
+Do not run old and new alert workers concurrently during cutover.
+The digest worker stores one email_logs row per provider message and one
+email_log_listings row per included MLS number, committed with last_alert_sent.
+Failed provider requests create neither record and remain retryable.
+Previously sent single-listing emails and digest members are both excluded.
+No matches means no message. Weekly/monthly email size grows with matches;
+there is currently no batching, truncation, or provider-size fallback.
+Opens belong to the whole digest; clicked URLs identify individual homes.
+Admin email details list included homes. Counters remain message-level.
+Provider-acceptance/commit crash and overlapping-worker duplicate risks remain;
+this change does not add durable send claims or provider idempotency.
+
+### Offline digest preview
+
+From the backend repository, run:
+
+```bash
+venv/bin/python -B -m scripts.preview_alert_digest --output /tmp/weekly-digest-preview.html
+open /tmp/weekly-digest-preview.html
+```
+
+For a monthly preview, add `--frequency monthly`. The command uses the same
+renderer as the worker, with three fictional homes, embedded placeholder images,
+and inactive links. It does not load environment files, access a database, import
+an email transport, or send messages. No APP_ENV setting or database is needed.
+The browser preview does not guarantee identical rendering in email clients.

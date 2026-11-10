@@ -155,6 +155,14 @@ class EmailLog(Base):
     search = relationship("SavedSearch")
 
 
+
+class EmailLogListing(Base):
+    """Listings included in one digest; tracking stays on its single EmailLog."""
+    __tablename__ = "email_log_listings"
+    email_log_id = Column(Integer, ForeignKey("email_logs.id", ondelete="CASCADE"), primary_key=True)
+    listing_id = Column(String, primary_key=True, index=True)
+
+
 class EmailEvent(Base):
     """Verified provider events retained even before their email log exists."""
     __tablename__ = "email_events"

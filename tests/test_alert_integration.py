@@ -101,6 +101,68 @@ async def run_worker(sessions, sender, at=datetime(2026, 1, 3), **kwargs):
 
 @unittest.skipUnless(os.getenv("RUN_ALERT_DB_TESTS") == "1", "opt-in local database test")
 class AlertIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_weekly_and_monthly_digest_delivery_and_tracking(self):
+        from sqlalchemy import update, select, func
+        from datetime import timezone
+        from app.models import SavedSearch, Listing, EmailLog, EmailLogListing, Lead, EmailEvent
+        from app.services.email_events import record_event
+        from app.services.admin_reporting import email_rows, events, activity
+        for frequency in ("weekly", "monthly"):
+            with self.subTest(frequency=frequency):
+                async with alert_database() as (connection, sessions):
+                    await connection.execute(update(SavedSearch).values(frequency=frequency))
+                    await connection.execute(update(Listing).where(
+                        Listing.mls_number == "SYNTHETIC-TOO_EXPENSIVE").values(price=550000))
+                    at = datetime(2026, 2, 2, 17)
+                    sender = FakeEmailSender(reject_first=True)
+                    await run_worker(sessions, sender, at=at)
+                    self.assertEqual(len(sender.messages), 0)
+                    self.assertEqual((await connection.execute(select(func.count()).select_from(EmailLog))).scalar_one(), 0)
+                    await run_worker(sessions, sender, at=at)
+                    self.assertEqual(len(sender.messages), 1)
+                    self.assertIn("/SYNTHETIC-MATCH", sender.messages[0]["html"])
+                    self.assertIn("/SYNTHETIC-TOO_EXPENSIVE", sender.messages[0]["html"])
+                    self.assertIn("Unsubscribe", sender.messages[0]["html"])
+                    self.assertEqual((await connection.execute(select(func.count()).select_from(EmailLog))).scalar_one(), 1)
+                    self.assertEqual((await connection.execute(select(func.count()).select_from(EmailLogListing))).scalar_one(), 2)
+                    await run_worker(sessions, sender, at=at)
+                    await run_worker(sessions, sender, at=datetime(2026, 3, 2, 17))
+                    self.assertEqual(len(sender.messages), 1, "Already included listings must not resend next period")
+                    async with sessions() as db:
+                        log=(await db.execute(select(EmailLog))).scalar_one()
+                        for kind in ("email.opened", "email.clicked"):
+                            values={"provider_event_id":kind, "message_id":log.message_id,
+                                "event_type":kind, "occurred_at":at.replace(tzinfo=timezone.utc),
+                                "details":{"link":"https://gorgerealty.com/property/test/SYNTHETIC-MATCH"} if kind=="email.clicked" else {},
+                                "processing_status":"pending"}
+                            await record_event(db, values)
+                            await record_event(db, values)
+                        await db.commit()
+                        report=(await email_rows(db,[log]))[0]
+                        self.assertEqual(report["recorded_open_count"],1)
+                        self.assertEqual(report["recorded_click_count"],1)
+                        self.assertEqual(len(report["included_listings"]),2)
+                        timeline=await events(db,1,log.id,1,20)
+                        self.assertTrue(next(e for e in timeline["items"] if e["event_type"]=="email.clicked")["is_listing_click"])
+                        dashboard=await activity(db,0,1,20)
+                        self.assertEqual(dashboard["summary"]["recorded_opens"],1)
+                        self.assertEqual(dashboard["summary"]["recorded_clicks"],1)
+                        self.assertEqual(dashboard["items"][0]["last_activity_kind"],"listing_click")
+                        self.assertEqual(dashboard["items"][0]["listing_id"],"SYNTHETIC-MATCH")
+
+    async def test_digest_respects_pause_and_unsubscribe(self):
+        from sqlalchemy import update
+        from app.models import SavedSearch, Lead
+        async with alert_database() as (connection, sessions):
+            await connection.execute(update(SavedSearch).values(frequency="weekly", is_active=False))
+            sender=FakeEmailSender()
+            await run_worker(sessions,sender,at=datetime(2026,2,2,17))
+            self.assertEqual(len(sender.attempts),0)
+            await connection.execute(update(SavedSearch).values(is_active=True))
+            await connection.execute(update(Lead).values(is_unsubscribed=True))
+            await run_worker(sessions,sender,at=datetime(2026,2,2,17))
+            self.assertEqual(len(sender.attempts),0)
+
     async def test_daily_partial_failure_retries_and_waits_after_success(self):
         from sqlalchemy import update
         from app.models import SavedSearch, Listing
