@@ -455,3 +455,138 @@ The write requires an admin session, trusted Origin and session CSRF token.
 Live production-data preview shows the form but disables saving, and server-side
 protections also block it. Use the fictional local admin demo for write testing.
 No database migration is needed.
+
+### RealScout contact CSV importer
+
+`python -m scripts.import_realscout_contacts` defaults to **offline CSV validation**:
+it does not load `.env`, connect to a database, or send email. It imports contact
+records only, never saved searches, alerts, invitations, or delivery history.
+
+```bash
+venv/bin/python -B -m scripts.import_realscout_contacts contacts.csv
+```
+
+`Deleted?` is retained as **RealScout source metadata only**. Both true and false
+rows are included, and neither value is interpreted as an opt-in or opt-out.
+Existing `is_unsubscribed` and `unsubscribed_at` values are never changed by the
+importer. New contacts use the application's default false unsubscribe flag and
+have no saved searches, so importing them does not enable email delivery. Their
+actual subscription preferences are unknown and must be reviewed before manually
+activating searches. No email consent is inferred from inclusion in the CSV.
+Existing nonempty names, emails, phones and unsubscribe tokens are preserved;
+missing names and safe phones are filled. New contacts receive unsubscribe tokens
+through the existing model default.
+
+If an older version of this importer has already run, do not blanket-resubscribe
+contacts with `source_deleted = true`: those records may also have genuine opt-outs.
+The ledger did not record their pre-import preferences. Review against backups or
+other reliable preference history before changing existing unsubscribe flags.
+
+Preparation and production steps (not performed automatically):
+
+1. Review/apply `migrations/003_realscout_contact_imports.sql` once to the intended
+   database/schema. It creates an import ledger linked to existing leads. It does
+   not change or remove clients and does not create any searches. The importer
+   does not create tables or apply migrations itself.
+2. Keep the private CSV out of Git (`/contacts.csv` is ignored). Place it alongside
+   the script's intended backend environment. Do not use the production CSV with
+   the fictional demo unless that is an intentional data-copy decision.
+3. Run a read-only comparison using the intended backend configuration:
+
+   ```bash
+   venv/bin/python -B -m scripts.import_realscout_contacts contacts.csv --check-database
+   ```
+
+   This loads the configured database and starts a read-only transaction. It
+   reports new clients, existing matches, preference-review counts, omitted phone
+   values, missing tokens, source mappings and conflicts. It does not send email.
+4. After reviewing that comparison, explicitly apply in the intended environment:
+
+   ```bash
+   venv/bin/python -B -m scripts.import_realscout_contacts contacts.csv --apply
+   ```
+
+   Apply rebuilds its plan, serializes other importer runs, and commits all changes
+   in one transaction. Invalid/duplicate CSV rows or ambiguous database matches
+   block the import. Constraint errors roll back the transaction. An uncertain
+   connection failure at commit requires checking again before retrying.
+
+Matching uses trimmed, case-insensitive email plus the persisted RealScout Contact
+ID. Repeating the import reuses existing clients and source mappings. A source ID
+that changes email/client, multiple database clients with the same normalized email,
+or a client mapped to a different source ID is blocked for manual review. Existing
+subscription preferences are never changed by importing any row.
+
+Phones use mobile, then home, then work. Supported North American numbers are
+normalized to +1 format. Invalid, shared CSV phone numbers, or numbers belonging to
+another database client are omitted rather than failing client creation or merging
+people. Existing phones are retained. Original values remain in your private CSV.
+
+The ledger retains source contact IDs, source deletion flags and exported alert
+counts for manual migration review, including rows marked deleted. Counts do not create or activate searches and
+do not establish whether a RealScout search is enabled. Home-value alerts are not
+implemented in this replacement. Agent fields, additional contacts, addresses,
+lead source, and original Added At are not imported into the contact profile.
+
+Output contains aggregate counts and conflict row numbers, not names, emails,
+phones, source IDs, tokens or credentials. An optional new private JSON report adds
+per-row outcomes, internal client IDs and omitted-phone flags:
+
+```bash
+venv/bin/python -B -m scripts.import_realscout_contacts contacts.csv --check-database --report realscout-import-report-check.json
+```
+
+Reports use mode 0600, refuse overwriting an existing file, and the suggested report
+names are ignored by Git. `--report` also works with offline validation or apply.
+A report-write failure after a successful import is reported separately; it does
+not undo the committed import.
+
+Read-only preview permits comparison but blocks `--apply` before database access.
+In `APP_ENV=test`, normal guarded TEST_DATABASE_URL selection applies, and this
+CLI targets `admin_demo` to match the local Admin UI. Recreate the fictional demo
+schema with the updated seed script before a local write test; that seed resets
+fictional demo data and includes the new ledger table. Regression tests instead
+use fresh transactional schemas and fictional CSVs, blocking external network and
+all real email delivery. No production CSV is used by the regression tests.
+
+### Reviewed RealScout pilot searches
+
+`scripts.import_realscout_pilot` accepts a private reviewed manifest for at most
+three CSV contacts and their searches. Default mode validates offline; use
+`--check-database` for a read-only comparison and `--apply` for one atomic import.
+It reuses migration 003 for contact identities; source search IDs are stored in
+`SavedSearch.criteria._realscout`. A repeat run reuses identical paused source
+searches and refuses changed, ambiguous, or already-activated searches. It never
+changes RealScout, sends email, or activates searches. Subscription preferences
+retain the contact importer's metadata-only treatment of `Deleted?`.
+
+Source filters must be reviewed before preparing a manifest. Unsupported criteria
+block validation. ZIP codes now have an exact `Listing.zipcode` filter shared by
+preview and worker matching, separate from city substring matching. Admin supports
+ZIP entry and summaries. Source daily/weekly/monthly schedules are retained on
+paused search records; this does not implement their scheduling in the worker.
+Imported source metadata and unsupported frequencies block activation through the
+current Admin editor. Complete scheduling/provenance review before enabling them.
+
+Keep real manifests/receipts private. `realscout-pilot*.json` in the repository root
+is ignored; optional reports use mode 0600 and refuse overwrites. Production
+migration/import operations require deliberate use of the intended configuration;
+`--apply` is blocked in read-only preview. Normal database transactions remain
+separate from the preview server. No backend/frontend deployment is automatic.
+
+### Listing alert delivery schedules
+
+The listing worker supports instant, daily, weekly, and monthly frequencies. Instant checks
+every worker run. Daily is due at 08:00 America/Los_Angeles; monthly is due on
+the first at 08:00 in that zone. Weekly alerts are due Mondays at 08:00 Pacific. Delivery happens on the next worker run, including
+after downtime. Searches created after a boundary wait for the next boundary.
+No matches means no email. Emails remain one per listing, not a digest.
+A failed batch keeps its prior scheduling timestamp so failed matches retry on
+the next run; committed success logs exclude already sent listings.
+Unknown frequencies are skipped. Property watches and market alerts retain
+their separate existing behavior. No schema migration is required.
+The admin editor can save these frequencies; edits remain paused.
+Imported searches with review metadata remain blocked from activation pending
+explicit review. This change does not remove that safeguard.
+Concurrent jobs and a crash between provider acceptance and DB commit still
+require durable delivery claims/idempotency; run only one worker at a time.

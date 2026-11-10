@@ -1,4 +1,5 @@
 from app.preview import require_writable_mode
+from zoneinfo import ZoneInfo
 import os
 import asyncio
 import re
@@ -58,6 +59,31 @@ async def send_resend_email(to_email, subject, html_content, db, search, listing
 def naive_utc(value):
     # Current DB columns are naive; normalize aware clock inputs before comparing.
     return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
+def listing_schedule_due(search, current_time):
+    """Calendar windows at 08:00 America/Los_Angeles; DB timestamps are UTC."""
+    if search.frequency == "instant":
+        return True
+    if search.frequency not in ("daily", "weekly", "monthly"):
+        return False  # Unknown schedules must never silently become instant.
+    local = naive_utc(current_time).replace(tzinfo=timezone.utc).astimezone(
+        ZoneInfo("America/Los_Angeles"))
+    boundary = local.replace(hour=8, minute=0, second=0, microsecond=0)
+    if search.frequency == "daily":
+        if local < boundary:
+            boundary -= timedelta(days=1)
+    elif search.frequency == "weekly":
+        boundary -= timedelta(days=local.weekday())
+        if local < boundary:
+            boundary -= timedelta(days=7)
+    else:
+        boundary = boundary.replace(day=1)
+        if local < boundary:
+            boundary = (boundary - timedelta(days=1)).replace(day=1)
+    boundary = boundary.astimezone(timezone.utc).replace(tzinfo=None)
+    baseline = naive_utc(search.last_alert_sent or search.created_at)
+    return baseline < boundary
 
 
 async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
@@ -269,6 +295,10 @@ async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
             # 3. LEGACY MAP SEARCH ALERT
             # ---------------------------------------------------------
             else:
+                if not listing_schedule_due(search, current_time):
+                    continue
+                previous_sent = search.last_alert_sent
+                batch_failed = False
                 from app.services.search_matching import listing_matches
                 query = listing_matches(criteria).where(Listing.created_at > naive_utc(search.created_at))
                 query = query.where(~select(EmailLog.id).where(
@@ -309,8 +339,13 @@ async def process_alerts(session_factory=None, sender=None, now=None, delay=0.9,
                         </p>
                     </div>
                     """
-                    await send_resend_email(lead.email, subject, html_content, db, search, str(listing.mls_number),
+                    sent = await send_resend_email(lead.email, subject, html_content, db, search, str(listing.mls_number),
                                             sender=sender, now=now, delay=delay)
+                    batch_failed = batch_failed or not sent
+                if batch_failed:
+                    # Keep this window due; successful logs still prevent repeats.
+                    search.last_alert_sent = previous_sent
+                    await db.commit()
 
 if __name__ == "__main__":
     asyncio.run(process_alerts())

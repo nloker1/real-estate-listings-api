@@ -174,3 +174,14 @@ class EmailEvent(Base):
     email_log_id = Column(Integer, ForeignKey("email_logs.id", ondelete="SET NULL"), nullable=True)
 
 
+class RealScoutContactImport(Base):
+    """Source identity for repeatable contact imports; no saved-search criteria."""
+    __tablename__ = "realscout_contact_imports"
+    contact_id = Column(String(255), primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"), nullable=False, index=True)
+    source_deleted = Column(Boolean, nullable=False)
+    listing_alert_count = Column(Integer, nullable=False, default=0)
+    market_alert_count = Column(Integer, nullable=False, default=0)
+    home_value_alert_count = Column(Integer, nullable=False, default=0)
+    imported_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_imported_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

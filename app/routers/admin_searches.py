@@ -1,6 +1,6 @@
 """Authenticated saved-search editing; no email delivery is performed here."""
 import hmac
-from typing import Annotated
+from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select, func
@@ -16,6 +16,7 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 class Criteria(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     cities: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(default_factory=list, max_length=50)
+    zipcodes: list[Annotated[str, Field(pattern=r'^\d{5}$')]] = Field(default_factory=list, max_length=50)
     minPrice: int | None = Field(None, ge=0, le=1000000000)
     maxPrice: int | None = Field(None, ge=0, le=1000000000)
     minBeds: int | None = Field(None, ge=0, le=100)
@@ -28,6 +29,7 @@ class Criteria(BaseModel):
 
     @model_validator(mode='after')
     def validate_filters(self):
+        self.zipcodes = list(dict.fromkeys(self.zipcodes))
         self.cities = list(dict.fromkeys(city.strip() for city in self.cities))
         if any(not city or '%' in city or '_' in city for city in self.cities):
             raise ValueError('Enter city names without wildcard characters')
@@ -45,6 +47,7 @@ class Criteria(BaseModel):
 class SearchBody(BaseModel):
     model_config = ConfigDict(extra='forbid')
     criteria: Criteria
+    frequency: Literal["instant", "daily", "weekly", "monthly"] = "instant"
 
 
 class SearchState(BaseModel):
@@ -90,7 +93,7 @@ def configure_routes(admin_db):
     @router.post('/clients/{client_id}/searches', status_code=201, dependencies=[Depends(writable)])
     async def create(client_id: int, body: SearchBody, db=Depends(admin_db)):
         await require_client(db, client_id)
-        search = SavedSearch(lead_id=client_id, criteria=body.criteria.filters(), frequency='instant', is_active=False)
+        search = SavedSearch(lead_id=client_id, criteria=body.criteria.filters(), frequency=body.frequency, is_active=False)
         db.add(search)
         await db.commit()
         return {'id': search.id, 'is_active': False}
@@ -101,6 +104,7 @@ def configure_routes(admin_db):
         if not editable_search(search):
             raise HTTPException(409, 'This search has settings the editor does not support')
         search.criteria = body.criteria.filters()
+        search.frequency = body.frequency
         # A criteria change always requires review and explicit reactivation.
         search.is_active = False
         await db.commit()
@@ -113,7 +117,7 @@ def configure_routes(admin_db):
         if body.is_active and lead.is_unsubscribed:
             raise HTTPException(409, 'This client is unsubscribed; their preferences have not been changed')
         if body.is_active and not editable_search(search):
-            raise HTTPException(409, 'Activation is supported only for listing searches with instant alerts')
+            raise HTTPException(409, 'Review unsupported search settings before activation')
         if body.is_active:
             try:
                 Criteria.model_validate(search.criteria)

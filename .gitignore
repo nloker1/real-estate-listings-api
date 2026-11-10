@@ -19,3 +19,9 @@ nohup.out
 .DS_Store
 Thumbs.db
 __pycache__/
+
+# Private client exports and import reports
+/contacts.csv
+/realscout-import-report*.json
+
+/realscout-pilot*.json

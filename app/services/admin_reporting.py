@@ -141,14 +141,14 @@ async def searches(db, client_id, page, page_size):
     rows = (await db.execute(query.order_by(SavedSearch.created_at.desc(), SavedSearch.id.desc())
                            .offset((page - 1) * page_size).limit(page_size))).scalars().all()
     # Criteria are an allowlist: arbitrary signup JSON is not a private-data export.
-    keys = {"alert_type", "mls_number", "city", "cities", "search", "propertyType", "minPrice", "maxPrice",
+    keys = {"alert_type", "mls_number", "city", "cities", "zipcodes", "search", "propertyType", "minPrice", "maxPrice",
             "minBeds", "minBaths", "minSqft", "maxSqft", "minAcres", "maxAcres"}
     def visible_criteria(criteria):
         output = {}
         for key, value in criteria.items():
             if key not in keys:
                 continue
-            if key == "cities" and isinstance(value, list):
+            if key in {"cities", "zipcodes"} and isinstance(value, list):
                 output[key] = [city[:100] for city in value[:100] if isinstance(city, str)]
             elif isinstance(value, (str, int, float)) and not isinstance(value, bool):
                 output[key] = value[:200] if isinstance(value, str) else value

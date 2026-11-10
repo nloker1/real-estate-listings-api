@@ -101,6 +101,23 @@ async def run_worker(sessions, sender, at=datetime(2026, 1, 3), **kwargs):
 
 @unittest.skipUnless(os.getenv("RUN_ALERT_DB_TESTS") == "1", "opt-in local database test")
 class AlertIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_daily_partial_failure_retries_and_waits_after_success(self):
+        from sqlalchemy import update
+        from app.models import SavedSearch, Listing
+        async with alert_database() as (connection, sessions):
+            await connection.execute(update(SavedSearch).values(frequency="daily", last_alert_sent=datetime(2026, 1, 1, 18)))
+            await connection.execute(update(Listing).where(
+                Listing.mls_number == "SYNTHETIC-TOO_EXPENSIVE").values(price=550000))
+            sender = FakeEmailSender(reject_first=True)
+            await run_worker(sessions, sender, at=datetime(2026, 1, 2, 15, 59))
+            self.assertEqual(len(sender.attempts), 0)
+            await run_worker(sessions, sender, at=datetime(2026, 1, 2, 16))
+            self.assertEqual(len(sender.attempts), 2)
+            await run_worker(sessions, sender, at=datetime(2026, 1, 2, 16, 1))
+            self.assertEqual(len(sender.attempts), 3)
+            await run_worker(sessions, sender, at=datetime(2026, 1, 2, 17))
+            self.assertEqual(len(sender.attempts), 3)
+
     async def test_partial_delivery_failure_is_retried_without_resending_success(self):
         await self.check_partial_delivery_retry(FakeEmailSender(reject_first=True))
 
